@@ -1,0 +1,41 @@
+project:
+  seed: 42
+  model_path: third_party/mujoco_menagerie/i2rt_yam/yam.xml
+
+env:
+  stage: reach
+  control_hz: 30
+  physics_substeps: 8
+  episode_steps: 180
+  success_distance_m: 0.02
+  action_delta_rad: 0.02
+  action_lowpass: 0.35
+  max_joint_velocity_rad_s: 1.0
+  max_joint_torque_nm: 10.0
+  velocity_penalty: 0.002
+  jerk_penalty: 0.002
+  target_offset_low: [-0.08, -0.08, -0.08]
+  target_offset_high: [0.08, 0.08, 0.06]
+  home_qpos: [-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637]
+  object_radius_range_m: [0.25, 0.45]
+  object_angle_range_rad: [-0.55, 0.55]
+  lift_height_m: 0.08
+  lift_hold_s: 0.5
+  grasp_bonus: 0.05
+  lift_bonus: 3.0
+  collision_penalty: 0.2
+  success_bonus: 5.0
+  action_delay_steps: 0
+  target_jump_probability_per_step: 0.002
+
+training:
+  n_envs: 12
+  total_timesteps: 500000
+  learning_rate: 0.0003
+  n_steps: 256
+  batch_size: 256
+  gamma: 0.99
+  gae_lambda: 0.95
+  ent_coef: 0.001
+  policy_layers: [256, 256]
+  checkpoint_freq: 100000

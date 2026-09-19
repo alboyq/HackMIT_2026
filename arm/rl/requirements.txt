@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0
+numpy==2.3.4
+scipy==1.16.3
+mujoco==3.3.7
+gymnasium==1.2.1
+stable-baselines3==2.7.0
+tensorboard==2.20.0
+PyYAML==6.0.3
+pytest==8.4.2
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+
