@@ -13,6 +13,7 @@ from arm.ik.planner import Expert
 from arm.ik.solver import ArmIK, ToolFrame
 from arm.ik.scene import LIBRARY, YamScene
 from arm.ik.trajectory import minimum_jerk, validate_trajectory
+from arm.ik.fake_target_demo import run_fake_target
 
 DOWN = np.array([0.0, 0.0, -1.0])
 
@@ -111,6 +112,12 @@ def test_minimum_jerk_limits(scene):
 def test_controller_switch_defaults_to_ik(scene, tmp_path):
     assert isinstance(select_controller("ik", scene), IKController)
     assert isinstance(select_controller("auto", scene, tmp_path / "missing.json"), IKController)
+
+
+def test_fake_target_to_lift_end_to_end():
+    result = run_fake_target()
+    assert result["ok"], result
+    assert result["lift_m"] >= 0.08
 
 
 def test_present_at_mouth_without_touching_the_user():
