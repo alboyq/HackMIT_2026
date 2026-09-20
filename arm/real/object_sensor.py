@@ -28,6 +28,8 @@ DISTRACTORS = ["hand", "robot gripper", "table", "plate", "laptop", "phone", "ca
 
 
 MENU = ["strawberry", "grape", "can"]        # what is on the table today; edit or pass --menu
+CLIP_NAME = {"can": "soda can"}
+RED_THINGS = {"grape", "strawberry", "cherry", "raspberry", "tomato", "can"}   # found by colour + CLIP (a red Coke can included)
 RED_FRUIT = {"grape", "strawberry", "cherry", "raspberry", "tomato"}
 
 
@@ -83,12 +85,14 @@ def red_fruit_box(frame_bgr, target):
         cands.append(((float(x), float(y), float(x + w), float(y + h)), frame_bgr[max(0, y - m2):y + h + m2, max(0, x - m2):x + w + m2]))
     if not cands:
         return None
-    # Only what is actually on the table competes. With every red fruit as a label the strawberry came out 'raspberry'
-    # (0.72) and the grape 'cherry' (0.96); between just strawberry and grape they score 0.84-0.94 and 1.00.
-    labels = sorted(set(MENU) & RED_FRUIT | {target})
-    p = _clip_probs([c for _, c in cands], labels)[:, labels.index(target)]
+    # Only what is actually on the table competes, plus the red NON-foods this camera really sees (a Coke can scored
+    # 'soda can' 1.00, the wood wall 0.8-0.97) so they have somewhere to go. With every red fruit as a label the strawberry
+    # came out 'raspberry' (0.72) and the grape 'cherry' (0.96); like this: strawberry 0.71-0.94, grape 1.00.
+    want = CLIP_NAME.get(target, target)
+    labels = sorted({CLIP_NAME.get(m, m) for m in MENU if m in RED_THINGS} | {want}) + ["roll of tape", "wooden wall"]
+    p = _clip_probs([c for _, c in cands], labels)[:, labels.index(want)]
     k = int(np.argmax(p))
-    return cands[k][0] if p[k] >= 0.6 else None
+    return cands[k][0] if p[k] >= 0.5 else None
 
 
 @dataclass
@@ -124,12 +128,12 @@ class ObjectSensor:
             if self.names[int(b.cls[0])] in PEOPLE:
                 people.append(tuple(float(v) for v in b.xyxy[0]) + (float(b.conf[0]),))
         box, conf = (None, 0.0) if best is None else (tuple(float(v) for v in best.xyxy[0]), float(best.conf[0]))
-        if self.target in RED_FRUIT and conf < 0.25:
+        if self.target in RED_THINGS and conf < 0.25:
             # Measured on the real wrist camera: a grape / strawberry ~40 px across scores 0.01-0.07 with YOLO-World, i.e.
             # nothing. On a plain table they are the only saturated red things in view, so colour finds them every frame.
             alt = red_fruit_box(frame_bgr, self.target)
-            if alt is not None:
-                box, conf = alt, max(conf, 0.5)
+            # no colour+CLIP candidate: a weak YOLO box is NOT kept (it called the red fire alarm on the wall 'strawberry', 0.17)
+            box, conf = (alt, max(conf, 0.5)) if alt is not None else (None, 0.0)
         if box is None:
             return ObjectReading(False, people=people)
         x1, y1, x2, y2 = box

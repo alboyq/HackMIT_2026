@@ -130,7 +130,7 @@ class Brain:
         a, _ = pol.predict(np.clip((obs - mean) / std, -clip, clip)[None], deterministic=True)
         return obs, self.apply(a[0])
 
-    def lift_step(self, anchor, direction=+1.0):
+    def lift_step(self, anchor, direction=+1.0, jaws=-1.0):
         e = self.e
         mujoco.mj_jacSite(e.model, e.data, self.jacp, self.jacr, e.tool.site_id)
         J = np.vstack([self.jacp[:, e.dadr], self.jacr[:, e.dadr]])
@@ -138,13 +138,13 @@ class Brain:
         dxy = np.clip(K_XY * (anchor[:2] - tcp[:2]), -0.003, 0.003)
         twist = np.array([dxy[0], dxy[1], direction * STEP_UP, 0, 0, 0]) * min(1.0, 2 * self.speed)
         dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), twist)
-        a = np.zeros(7); a[:6] = np.clip(dq / float(e.ecfg["action_delta_rad"]), -1, 1); a[6] = -1.0
+        a = np.zeros(7); a[:6] = np.clip(dq / float(e.ecfg["action_delta_rad"]), -1, 1); a[6] = jaws
         return self.apply(a)
 
 
 class SimBody:
     """A separate physics simulation standing in for the real arm + wrist camera. Same interface the runner uses on RealArm."""
-    rate_hz = 30.0
+    rate_hz, stall_mps, stall_ticks = 30.0, 0.003, 3
 
     def __init__(self, slot, width_m, seed, noise_m=0.006):
         self.e, _ = make_env(slot, width_m, seed=seed)
@@ -179,7 +179,74 @@ class SimBody:
         return float(self.e.scene.object_pos(self.e.name)[2]) - self.z0
 
 
-def run(body, brain, log=print, settle_ticks=5, hold_s=2.0):
+class RealBody:
+    """The real arm (arm/real/real_arm.py) + the wrist camera (live_perception.py publishes detections on UDP 8092).
+    Food position = the detection's pixel -> ray (camera_model) -> base frame through FK and the measured camera mount
+    (handeye.py) -> where that ray meets the plane half a food-height above the table."""
+    rate_hz = 30.0
+    stall_mps, stall_ticks = 0.0012, 8     # the real jaws travel at only 4-7 mm/s: 'stopped' must mean well below that, for longer
+
+    def __init__(self, food, half_height_m, table_z=0.0):
+        import socket
+        from handeye import load
+        from real_arm import RealArm
+        self.T_tool_cam, _ = load()
+        self.z_plane, self.cam, self.prev_g, self.last, self.q = table_z + half_height_m, None, None, None, None
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); self.sock.bind(("127.0.0.1", 8092)); self.sock.setblocking(False)
+        xml = REPO / "third_party/mujoco_menagerie/i2rt_yam/yam.xml"
+        self.M = mujoco.MjModel.from_xml_path(str(xml)); self.D = mujoco.MjData(self.M)
+        self.l6 = mujoco.mj_name2id(self.M, mujoco.mjtObj.mjOBJ_BODY, "link_6")
+        self.arm = RealArm.connect(gripper=True)             # a person at the arm confirms; nothing moves until send()
+        print("[pick] squeeze limit:", self.arm.set_food(food), flush=True)
+
+    def read(self):
+        st = self.arm.read()
+        g = st.grip if np.isfinite(st.grip) else 0.0375
+        gd = 0.0 if self.prev_g is None else (g - self.prev_g) * self.rate_hz
+        self.prev_g, self.q = g, st.q.copy()
+        return st.q, st.qd, g, gd
+
+    def send(self, q_target, grip_m):
+        self.arm.send(q_target, grip_target=grip_m)
+        if self.arm.mode != "run":
+            raise RuntimeError(f"arm left run mode: {self.arm.fault}")
+
+    def camera(self):
+        import json
+        from camera_model import CameraModel
+        while True:
+            try:
+                self.last = json.loads(self.sock.recv(4096))
+            except (BlockingIOError, OSError):
+                break
+        d = self.last
+        if not d or not d.get("seen") or time.time() - d["t"] > 0.5 or self.q is None:
+            return None
+        if self.cam is None:
+            self.cam = CameraModel(d["w"], d["h"])
+        x1, y1, x2, y2 = d["box"]
+        ray_c = self.cam.rays([(0.5 * (x1 + x2), 0.5 * (y1 + y2))])[0]
+        self.D.qpos[:] = 0; self.D.qpos[:6] = self.q; mujoco.mj_kinematics(self.M, self.D)
+        R, t = self.D.xmat[self.l6].reshape(3, 3), self.D.xpos[self.l6]
+        ray = R @ self.T_tool_cam[:3, :3] @ ray_c
+        o = t + R @ self.T_tool_cam[:3, 3]
+        if ray[2] > -0.05:
+            return None                                       # not looking down at the table
+        p = o + ray * ((self.z_plane - o[2]) / ray[2])
+        return p if 0.10 < np.hypot(p[0], p[1]) < 0.65 else None
+
+    def goto(self, q_goal, peak=0.12):
+        """Slow cosine-eased joint move through send() (all guards active), jaws left alone."""
+        q0 = self.arm.to_model(self.arm._sp); T = (np.pi / 2) * float(np.abs(q_goal - q0).max()) / peak; t0 = time.time()
+        while self.arm.mode == "run":
+            el = time.time() - t0 - 1.0
+            if el > T:
+                break
+            self.arm.send(q0 + (q_goal - q0) * (0.0 if el < 0 else 0.5 * (1 - np.cos(np.pi * el / T))))
+        return self.arm.mode == "run"
+
+
+def run(body, brain, log=print, settle_ticks=5, hold_s=2.0, put_back=False):
     e, ecfg = brain.e, brain.e.ecfg
     q, qd, g, gd = body.read()
     e.data.ctrl[:6], e.data.ctrl[e.grip_aid] = q, e.grip_range[1]            # targets start where the arm IS, jaws open
@@ -201,9 +268,9 @@ def run(body, brain, log=print, settle_ticks=5, hold_s=2.0):
                     result = "reach never settled"; break
             else:
                 # motor-feedback pinch: commanded further shut than the jaws are, jaws stopped, and not closed on nothing
-                is_blocked = (g - gt) > 0.003 and abs(gd) < 0.003 and g > 0.006
+                is_blocked = (g - gt) > 0.003 and abs(gd) < body.stall_mps and g > 0.006
                 blocked = blocked + 1 if is_blocked else 0
-                if blocked >= 3:
+                if blocked >= body.stall_ticks:
                     stage, anchor = "lift", tcp.copy(); log(f"  t={i/30:4.1f}s jaws BLOCKED at {1000*g:.1f} mm/finger -> lift")
                 elif i > 600 * slow:
                     result = "never got hold of it"; break
@@ -216,6 +283,20 @@ def run(body, brain, log=print, settle_ticks=5, hold_s=2.0):
             if i - t_hold >= hold_s * 30:
                 held = (g - gt) > 0.003 and g > 0.006
                 result = "PICKED UP AND HELD" if held else "lifted but the jaws are empty"
+                if not put_back:
+                    break
+                stage = "lower"; log(f"  t={i/30:4.1f}s {result} -> setting it back down")
+        elif stage == "lower":
+            qt, gt = brain.lift_step(anchor, -1.0)
+            if tcp[2] - anchor[2] <= 0.004:
+                stage, t_hold = "release", i
+        elif stage == "release":
+            qt, gt = brain.lift_step(anchor, 0.0, jaws=+1.0)
+            if i - t_hold >= 30:
+                stage = "retreat"
+        elif stage == "retreat":
+            qt, gt = brain.lift_step(anchor, +1.0, jaws=+1.0)
+            if tcp[2] - anchor[2] >= 0.06:
                 break
         body.send(qt, gt)
     return result, stage
@@ -224,11 +305,37 @@ def run(body, brain, log=print, settle_ticks=5, hold_s=2.0):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--food", default="grape"); ap.add_argument("--body", default="sim", choices=["sim", "real"])
-    ap.add_argument("--episodes", type=int, default=10); ap.add_argument("--speed", type=float, default=1.0); ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--episodes", type=int, default=10); ap.add_argument("--speed", type=float, default=1.0); ap.add_argument("--look-only", action="store_true"); ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
     slot, width = FOODS.get(a.food.lower(), ("apple", 0.04))
     if a.body == "real":
-        raise SystemExit("the real body is wired in only after the sim body passes and the start pose has held on the arm (see README)")
+        # needs: live_perception.py running (it publishes what the wrist camera sees), the arm folded at rest, a person at the arm.
+        from real_arm import HOME_Q, check_path_to_start
+        body = RealBody(a.food.lower(), 0.5 * width)
+        res = "did not start"
+        try:
+            ok, text = check_path_to_start(body.arm.to_model(body.arm._sp)); print("[pick] path to the start pose:", text, flush=True)
+            if ok and body.goto(HOME_Q):
+                brain = Brain(slot, width, speed=a.speed)
+                seen = None
+                for _ in range(45):                          # 1.5 s at the start pose: let the camera find the food before anything moves
+                    body.read(); seen = body.camera(); body.arm.send(HOME_Q)
+                print("[pick] food seen at", None if seen is None else np.round(seen, 3), flush=True)
+                if seen is None:
+                    res = "the camera does not see the food from the start pose: not moving"
+                elif a.look_only:
+                    res = "look-only: not reaching"
+                else:
+                    res, _ = run(body, brain, put_back=True)
+                print("[pick] RESULT:", res, flush=True)
+                if body.arm.mode == "run":
+                    body.goto(HOME_Q)
+        except Exception as exc:  # noqa: BLE001
+            print("[pick] stopped:", repr(exc), flush=True); body.arm.hold()
+        print("[pick]", body.arm.shutdown(speed=0.12), flush=True)
+        while body.arm.mode == "hold":                       # never exit with the arm in the air: support it, then Ctrl-C
+            body.arm.send(None); time.sleep(1 / 30)
+        raise SystemExit(0)
     from collections import Counter
     tally, truth = Counter(), 0
     for ep in range(a.episodes):

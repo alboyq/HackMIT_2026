@@ -3,5 +3,5 @@
 cd ~/HackMIT_2026-arm-ik-rl/arm/real
 export DISPLAY=:1
 [ -z "${XAUTHORITY:-}" ] && export XAUTHORITY=$(ls /run/user/$(id -u)/.mutter-Xwaylandauth.* /run/user/$(id -u)/gdm/Xauthority 2>/dev/null | head -1)
-setsid nohup ../../.venv-vision/bin/python live_perception.py --food "${1:-grape}" > /tmp/live_perception.log 2>&1 < /dev/null &
+setsid nohup ../../.venv-vision/bin/python live_perception.py --food "${1:-grape}" --device $(ls /dev/video* | head -1) > /tmp/live_perception.log 2>&1 < /dev/null &
 echo started

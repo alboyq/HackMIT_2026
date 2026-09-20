@@ -14,5 +14,7 @@ case "$1" in
   grip)      $PY arm/real/real_arm.py --hold-test 12 --grip ;;
   start-dry) $PY arm/real/real_arm.py --goto-start --dry ;;
   start)     $PY arm/real/real_arm.py --goto-start --hold 5 --speed 0.12 ;;
+  look)      YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie PYTHONPATH=$PWD:$PWD/arm/rl OMP_NUM_THREADS=1 .venv-arm/bin/python arm/real/run_pick.py --body real --look-only --food "${2:-strawberry}" ;;
+  pick)      YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie PYTHONPATH=$PWD:$PWD/arm/rl OMP_NUM_THREADS=1 .venv-arm/bin/python arm/real/run_pick.py --body real --speed ${3:-0.3} --food "${2:-strawberry}" ;;
   *) sed -n 2,7p "$0" ;;
 esac

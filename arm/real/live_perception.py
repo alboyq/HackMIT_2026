@@ -12,6 +12,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import socket
+
 import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -79,6 +81,7 @@ show = bool(os.environ.get("DISPLAY"))
 print(f"[live] lens {'CALIBRATED' if cam.calibrated else 'UNCALIBRATED (ideal 150-deg fisheye)'}; "
       f"touch {touch:.1f} deg, stop {stop:.1f} deg; stream http://localhost:{args.port}", flush=True)
 n = 0
+_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)       # run_pick.py listens here for what the wrist camera sees
 while True:
     ok, f = cap.read()
     if not ok:
@@ -88,6 +91,7 @@ while True:
         food["dirty"] = False
     orr = obj.read(f)
     fr = FaceSensor.confirm(face.read(f), orr.people)
+    _udp.sendto(json.dumps({"t": time.time(), "food": food["name"], "seen": bool(orr.seen), "box": orr.box, "w": f.shape[1], "h": f.shape[0]}).encode(), ("127.0.0.1", 8092))
     vis = ObjectSensor.draw(FaceSensor.draw(f.copy(), fr, stop_deg=stop), orr)
     if not cam.calibrated:
         cv2.putText(vis, "LENS UNCALIBRATED - angles approximate", (12, vis.shape[0] - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)

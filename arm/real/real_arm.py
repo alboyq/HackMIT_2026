@@ -57,7 +57,7 @@ GRIP_LEADS = {"soft": 0.015,  # 0.3 N.m ~ 9 N : strawberry, grape, anything that
 FIRM_FOODS = {"can", "tape measure", "tape", "apple", "mug", "cup", "bottle", "block", "carrot"}
 SOFT_FOODS = {"strawberry", "grape", "raspberry", "blueberry", "tomato", "banana", "egg", "marshmallow"}
 GRIP_LEAD = GRIP_LEADS["soft"]   # default to gentle: dropping is bad, crushing is unrecoverable
-GRIP_FREE_LEAD = 0.03         # while the jaws are still MOVING they may be led by this much (0.6 N.m: enough to beat the mechanism's
+GRIP_FREE_LEAD = 0.05         # while the jaws are still MOVING they may be led by this much (0.6 N.m: enough to beat the mechanism's
                               # friction). Once they stall on something for GRIP_STALL_TICKS the lead drops to the food's limit.
 GRIP_STALL_RAD, GRIP_STALL_TICKS = 0.003, 2
 SUBSTEPS = 6                  # motor commands per 30 Hz policy tick (~200 Hz, the rate arm_replay flies at): no 0.02 rad torque steps
@@ -298,7 +298,7 @@ class RealArm(ArmInterface):
                 raise RuntimeError(f"laps given {list(laps)} but the encoders say {found}")
             if gm is not None and not (min(GRIP_RAW) - 0.3 <= here[6] <= max(GRIP_RAW) + 0.3):
                 raise RuntimeError(f"gripper reads {here[6]:+.3f}, outside its measured travel {GRIP_RAW}: its encoder lapped. Re-measure.")
-            arm = cls(joints, drv.gains_kp[:6], drv.gains_kd[:6], Gravity(found), found, factors=factors, lock=drv._lock,
+            arm = cls(joints, drv.gains_kp[:6], drv.gains_kd[:6], Gravity(found, xml=REPO / "third_party/mujoco_menagerie/i2rt_yam/yam.xml"), found, factors=factors, lock=drv._lock,
                       grip_motor=gm, grip_gains=(drv.gains_kp[6], drv.gains_kd[6]) if gm is not None else (20.0, 0.5))
             print(f"[RealArm] laps {found}; model pose {np.round(arm.to_model(here[:6]), 3)}", flush=True)
             seed = []
