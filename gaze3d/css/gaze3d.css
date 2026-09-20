@@ -1,0 +1,24 @@
+/* additions for the gaze3d page, on top of bench.css */
+.camslot--g3 { aspect-ratio: 16 / 9; overflow: hidden; }
+.camslot--g3 img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cropslot { display: flex; align-items: center; gap: .7rem; margin-top: .6rem; }
+.cropslot img { width: 72px; height: 72px; border-radius: 4px; border: 1px solid var(--line); image-rendering: auto; }
+.cropslot span { font-size: 10.5px; color: var(--dim); letter-spacing: .05em; }
+.actions--tight { margin-top: .5rem; gap: .4rem; }
+.models { list-style: none; margin: 0; padding: 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+.models li { display: flex; justify-content: space-between; padding: .3rem 0; border-bottom: 1px solid var(--line); color: var(--ink); }
+.models li span { color: var(--dim); }
+/* anchored next to the active target so the cue can be read without leaving it */
+.motion {
+  position: absolute; transform: translate(-50%, 0); width: max-content; max-width: 60vw;
+  text-align: center; font-family: 'IBM Plex Mono', monospace; letter-spacing: .04em; pointer-events: none;
+}
+.motion--above { transform: translate(-50%, -100%); }
+.motion b { display: block; font-size: 15px; font-weight: 500; color: var(--amber); margin-bottom: .5rem; }
+.motion i { display: block; width: 260px; height: 3px; margin: 0 auto; background: var(--line); position: relative; overflow: hidden; }
+.motion i::after { content: ''; position: absolute; inset: 0; width: var(--p, 0%); background: var(--amber); transition: width .12s linear; }
+.gazelayer--in { position: absolute; inset: 0; width: 100%; height: 100%; }
+.target--dyn .target__ring { stroke: var(--amber); stroke-dasharray: 6 8; animation: spin 6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.target--dyn svg { transform-origin: 50% 50%; }
+.chamber--fs { position: fixed; inset: 0; }
