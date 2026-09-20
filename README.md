@@ -18,12 +18,26 @@ Commanding MJCF values straight to the hardware points the whole arm ~82° off h
 jaws rolled ~75° — opposite ends of the chain, and invisible in simulation.
 
 ```
-q_model = sign * q_encoder - offset
+q_model = sign * (q_encoder + 2*pi*lap) - offset
 ```
 
-J3's offset is provisional; its real range is 16° wider than the MJCF's, so its hard stops do not
-pin it arithmetically. The five-pose FK check (TCP error under 10 mm) is **still outstanding** and
-is the remaining gate before `RealArm` gets a backend — it also resolves J3.
+**The encoders also come back one lap off after a power cycle.** The motors report position
+modulo one turn, so after the arm is powered off and on a joint can read exactly 2π away from
+where the map was measured (J2 and J3 did, after the venue move: raw −6.28 at rest instead of
++0.004). Nothing flags it. Pick the `lap` that puts each reading inside that joint's measured
+hard-stop range (`joint_map_measured.json` → `encoder_wrap`); exactly one fits. The openyam
+driver's own limits and `move_and_hold.py` presets do **not** do this, and `--preset home` would
+plan 6 rad of shoulder travel from a wrapped start. Read the arm, don't drive it, until that is
+handled.
+
+**Status.** The five-pose FK check has been run (`fk_check/`): all ten dot-to-dot distances agree
+with a ruler to within **7.9 mm** (rms 4.4), so J2–J5 and J3's offset are confirmed (the
+alternative J3 offset misses by 35 mm). Two limits: distances cannot see J1 or J6 offsets (those
+rest on the hard-stop measurements), and the tool tip was fitted rather than taken from the
+corrected `linear_4310` model — re-run `python fk_check/fk_analyse.py --tip X,Y,Z` with that
+model's tool point. Still to do before `RealArm` gets a backend: a startup step that applies the
+lap rule and puts the limits in the motor's current numbers; then the physical checks and CAN
+grounding listed under `outstanding`.
 
 Full method, per-joint hard stops, caveats and remaining steps are in that file and in
 `ARM_NOTES.md` on the [`arm-ik-rl`](../../tree/arm-ik-rl) branch, where the arm code lives.
