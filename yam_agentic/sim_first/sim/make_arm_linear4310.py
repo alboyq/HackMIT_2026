@@ -86,14 +86,28 @@ def build():
                     <body name="link_left_finger" pos="-0.0238981 0.0450619 -0.0545599" quat="0.499998 -0.5 -0.5 -0.500002">
                       <inertial pos="-0.0224716 0.0143408 -0.0426253" quat="0.498899 0.455348 -0.0576406 0.735143" mass="0.0710042" diaginertia="6.24193e-05 6.01079e-05 2.83591e-05"/>
                       <joint class="finger" name="left_finger" axis="0 0 -1" range="0 0.0475"/>
-                      <geom name="lf_pad" pos="0.129783 0.00999321 -0.0914614" quat="0.499998 0.5 0.500002 0.5" type="mesh" mesh="lin_tip_left"
-                        rgba="0.18 0.18 0.19 1" condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="lf_mesh" pos="0.129783 0.00999321 -0.0914614" quat="0.499998 0.5 0.500002 0.5" type="mesh" mesh="lin_tip_left"
+                        class="visual" rgba="0.18 0.18 0.19 1" contype="0" conaffinity="0"/>
+                      <geom name="lf_pad" class="collision" type="box" pos="-0.060440 0.023898 -0.050062"
+                        quat="0.707107 0.000003 -0.707107 0.000000" size="0.0050 0.0120 0.0230"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="lf_tip0" class="collision" type="sphere" pos="-0.045440 0.023898 -0.049062" size="0.0040"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="lf_tip1" class="collision" type="sphere" pos="-0.075440 0.023898 -0.049062" size="0.0040"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
                     </body>
                     <body name="link_right_finger" pos="0.0238981 -0.0450619 -0.0545599" quat="0.707105 0.707108 0 0">
                       <inertial pos="-0.0143408 -0.0224716 -0.0426253" quat="0.281222 0.8726 0.16705 -0.362738" mass="0.0710042" diaginertia="6.24193e-05 6.01079e-05 2.83591e-05"/>
                       <joint class="finger" name="right_finger" axis="0 0 -1" range="0 0.0475"/>
-                      <geom name="rf_pad" pos="-0.0379932 0.129783 0.00133753" quat="0.707105 -0.707108 0 0" type="mesh" mesh="lin_tip_right"
-                        rgba="0.18 0.18 0.19 1" condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="rf_mesh" pos="-0.0379932 0.129783 0.00133753" quat="0.707105 -0.707108 0 0" type="mesh" mesh="lin_tip_right"
+                        class="visual" rgba="0.18 0.18 0.19 1" contype="0" conaffinity="0"/>
+                      <geom name="rf_pad" class="collision" type="box" pos="-0.023898 -0.060440 -0.050062"
+                        quat="0.500001 0.499999 0.499999 -0.500001" size="0.0050 0.0120 0.0230"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="rf_tip0" class="collision" type="sphere" pos="-0.023898 -0.045440 -0.049062" size="0.0040"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
+                      <geom name="rf_tip1" class="collision" type="sphere" pos="-0.023898 -0.075440 -0.049062" size="0.0040"
+                        condim="4" friction="1.2 0.01 0.001" solimp="0.95 0.99 0.001"/>
                     </body>
                   </body>
 '''

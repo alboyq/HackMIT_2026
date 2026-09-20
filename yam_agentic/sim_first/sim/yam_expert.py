@@ -224,12 +224,23 @@ class Expert:
         # it — measured: the 50 mm block was approached 16 mm off-centre with a 58 mm opening.
         g_open = float(self.tool.grip_range[1])
         g_shut = self.tool.ctrl_for_width(max(0.0, o.width - SQUEEZE))
-        pre = tcp - tool_dir * APPROACH
-
-        q_pre, ok, info = self.ik.solve_best(pre, tool_dir, jaw_dir=jaw_dir, q_init=self.home_q)
-        if not ok:
+        # The pre-grasp standoff only has to leave room for the descent, so when the full
+        # APPROACH is out of reach a shorter one is a real grasp, not a compromise. The TCP sits
+        # 30 mm further down the tool axis on linear_4310 than on the crank, which pushes the
+        # wrist that much higher here and takes the low, close objects out of reach at 100 mm.
+        pre = q_pre = None
+        first_err = None
+        for standoff in (APPROACH, 0.08, 0.06, 0.045):
+            cand = tcp - tool_dir * standoff
+            q, ok, info = self.ik.solve_best(cand, tool_dir, jaw_dir=jaw_dir, q_init=self.home_q)
+            if first_err is None:
+                first_err = info.get("err_pos", 9)
+            if ok:
+                pre, q_pre = cand, q
+                break
+        if q_pre is None:
             return Plan(ok=False, why=f"pre-grasp unreachable for {name} "
-                                      f"({info.get('err_pos', 9) * 1000:.0f} mm off, {strategy})")
+                                      f"({first_err * 1000:.0f} mm off, {strategy})")
         wps = [Waypoint(q_pre, g_open, hold=PRE_DWELL, tag="pre")]
         seg, why = self._cart_segment(q_pre, pre, tcp, tool_dir, g_open, "descend", jaw_dir)
         if seg is None:

@@ -65,7 +65,7 @@ YAMDIR = _find_menagerie()
 # Which gripper the arm carries. "linear_4310" is what is on the bench: rack-and-pinion sliding
 # jaws on a DM4310, 95 mm throw, matching I2RT's published spec. The stock menagerie yam.xml
 # carries crank_4310 instead (79 mm) — see rl/yam/make_arm_linear4310.py. YAM_ARM=stock reverts.
-_VARIANT = os.environ.get("YAM_ARM", "stock")   # "linear_4310" = correct gripper, grasping WIP (see make_arm_linear4310.py)
+_VARIANT = os.environ.get("YAM_ARM", "linear_4310")   # the gripper actually on the bench; "stock" = menagerie crank_4310
 ARM_XML = YAMDIR / ("yam.xml" if _VARIANT == "stock" else f"_yam_{_VARIANT.replace('_', '')}.xml")
 if not ARM_XML.exists() and _VARIANT != "stock":
     raise RuntimeError(f"{ARM_XML} missing - run: python rl/yam/make_arm_linear4310.py")
@@ -160,9 +160,14 @@ def _patched_arm() -> Path:
     """yam.xml + a wrist camera on link_6, minus the stock keyframe (which is sized for the
     bare arm and goes stale as soon as the scene adds free bodies)."""
     src = ARM_XML.read_text()
-    anchor = '<site name="grasp_site"'
+    # Anchor on tcp_site, NOT grasp_site. Both sit in link_6 on the menagerie arm, but the
+    # linear_4310 graft moves grasp_site down into the `gripper_mount` body, which carries a
+    # 90 deg rotation — anchoring there put the wrist camera in the mount's frame, pointing
+    # 124 deg away from the TCP, and the wrist view was nothing but gripper. tcp_site stays in
+    # link_6 in both variants, which is the frame WRIST_POS/WRIST_AIM are expressed in.
+    anchor = '<site name="tcp_site"'
     if anchor not in src:
-        raise RuntimeError(f"{ARM_XML} has no grasp_site — model changed?")
+        raise RuntimeError(f"{ARM_XML} has no tcp_site — model changed?")
     # Mount measured off the model, not guessed: in link_6 local coords the gripper subtree
     # occupies x [-0.02,0.04] y [-0.049,0.039] z [0.03,0.138] and the TCP sits at
     # (0,-0.044,0.130). The camera goes on the +y side — the back of the hand, perpendicular
