@@ -17,3 +17,5 @@ jpeg_15                jpeg=15                                              78/9
 gamma_0.75             gamma=0.75                                           82/96 = 85%
 combo_mild             exposure=0.8,wb=warm,blur=1,noise=0.02,jpeg=50       75/96 = 78%
 combo_hard             exposure=0.6,wb=warm,blur=1.5,noise=0.04,jpeg=30     56/96 = 58%
+heldout+mild           exposure=0.8,wb=warm,blur=1,noise=0.02,jpeg=50       49/96 = 51%
+=== done Sat Sep 19 23:00:33 EDT 2026

@@ -111,10 +111,15 @@ training pool; corrected in `evidence/so101_jar/docs/ARRIVAL_DAY.md` §6.)
 | Lifted shadows (γ 0.75) | 85 % | +1 |
 | "Evening webcam" combo | 78 % | −6 |
 | "Bad webcam" combo (−0.7 EV, warm, blur σ 1.5, noise, JPEG q30) | 58 % | −26 |
+| Held-out backgrounds, clean image | 70 % | −14 |
+| **Held-out backgrounds + "evening webcam" combo** | **51 %** | **−33** |
 
-One cliff — blur — and otherwise a policy that shrugs off camera effects it never trained on.
-Full table, including the rows still running when this was written:
-`evidence/so101_jar/results/jar_act_v3.stress_obs.txt`.
+Taken one at a time, camera effects are cheap, with one cliff: defocus blur. **The row that
+matters most is the last one.** Held-out backgrounds alone cost 14 points and the mild camera
+combo alone costs 6; together they cost 33. The margins compound instead of adding — and a real
+deployment is exactly that stack (an unseen room *and* a real camera), so a policy trained the old
+way should be expected to arrive well below its sim score. Training has to cover both at once.
+Full table: `evidence/so101_jar/results/jar_act_v3.stress_obs.txt`.
 
 **What was actually fragile:** camera *position* (84 / 66 / 46 % at ±2 / 7 / 10 cm offset;
 wide randomisation with filtered demos recovers 83 / 77 / 69 / 77 / 58 % at ±0 / 4 / 10 / 15 /
