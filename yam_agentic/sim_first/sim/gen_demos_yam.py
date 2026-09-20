@@ -58,10 +58,22 @@ def run_episode(sc, ex, seed, np, mujoco):
     play([sc.to_ctrl(prev)] * int(HOLD_S / sim_dt))                      # learn to stop and stay
     tcp = ex.ik.fk(sc.q_arm, qpos_full=sc.data.qpos)[0]
     obj = sc.object_pos(target)
-    ok = (np.linalg.norm(obj - tcp) < 0.08 and obj[2] > 0.12
-          and np.linalg.norm(tcp - pres.stage_pos) < 0.04)
-    if not ok:
-        return None, "payload not at staging"
+    # Accept on the TASK, not on pose-matching. Measured 2026-09-20: a 4 cm match against the
+    # planner's chosen stage_pos rejected 30 % of episodes whose object was still held (median
+    # 1.6 cm from the TCP), off the table (median 33.8 cm) and at the right standoff
+    # (TCP->mouth 14.4-15.7 cm against a 15 cm target). They had simply settled at a different
+    # point on the standoff sphere, because the arm droops ~2.8 cm under payload — which is
+    # realistic and should not be filtered out. Filtering on it biased the set toward users the
+    # arm happens to track precisely.
+    d_mouth = float(np.linalg.norm(obj - sc.site("mouth")))
+    if np.linalg.norm(obj - tcp) >= 0.08:
+        return None, "payload dropped"
+    if obj[2] <= 0.12:
+        return None, "payload too low"
+    if not (0.12 <= d_mouth <= 0.20):
+        return None, "payload not at the mouth standoff"
+    if np.linalg.norm(tcp - pres.stage_pos) >= 0.10:
+        return None, "staging pose wildly off"
     return dict(scene=S, wrist=W, state=X, action=A), target
 
 
