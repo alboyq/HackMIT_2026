@@ -1,8 +1,8 @@
 """Where the wrist camera sits relative to the gripper (T_tcp_cam). Needed to turn 'the strawberry is at
 this pixel' into 'the strawberry is at x, y on the table' - the position the learned policies consume.
 
-NOMINAL: the mount the sim uses (arm/ik/scene.py: 6.5 cm off the claw axis, 6 cm up the tool, tilted in
-~33 deg). Good to a couple of cm if the real bracket matches; the perception-noise model the policies were
+NOMINAL: the mount as MEASURED with a ruler on the real gripper (76 mm back from the tips, 59 mm above the jaws,
+45 deg; the sim's is 6.5 cm / 6 cm / 33 deg). Good to a couple of cm if the real bracket matches; the perception-noise model the policies were
 trained with (12 mm bias, scaled by range) was chosen to absorb roughly that.
 
 REFINED: hand-eye (Park-Martin, park_martin() below) from N poses. IMPORTANT - this needs NO powered motion: with the motors
@@ -17,13 +17,20 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# camera frame (OpenCV: x right, y down, z forward) expressed in the link_6 / tool frame (z along the claws)
-_fwd = np.array([0.0, 0.545, 0.838])                  # camera looks along this, in link_6 axes
+# camera frame (OpenCV: x right, y down, z forward) expressed in the link_6 / tool frame (z along the claws).
+# MEASURED on the real gripper with a ruler, 2026-09-20: the lens is 76 mm back from the claw tips, 59 mm above the
+# middle of the jaws, pitched 45 deg toward the claw axis. (The sim mount is 65 mm off-axis, 60 mm up the tool, 33 deg:
+# close, which is why the sim's view resembles the real one.) Claw tips are 0.146 m along link_6 z in the model.
+# Which SIDE of the jaws 'above' is cannot be told from a ruler; it is taken as the sim's side (-y), which matches the
+# real picture: the jaws appear at the BOTTOM of the frame. Ruler accuracy ~ +-5 mm / +-5 deg: refine with solve().
+TIP_Z, BACK_M, ABOVE_M, PITCH_DEG = 0.146, 0.076, 0.059, 45.0
+_p = np.radians(PITCH_DEG)
+_fwd = np.array([0.0, np.sin(_p), np.cos(_p)])        # camera looks along this, in link_6 axes
 _x = np.array([1.0, 0.0, 0.0])
 _y = np.cross(_fwd, _x)
 NOMINAL_T_TOOL_CAM = np.eye(4)
 NOMINAL_T_TOOL_CAM[:3, :3] = np.column_stack([_x, _y / np.linalg.norm(_y), _fwd / np.linalg.norm(_fwd)])
-NOMINAL_T_TOOL_CAM[:3, 3] = [0.0, -0.065, 0.06]
+NOMINAL_T_TOOL_CAM[:3, 3] = [0.0, -ABOVE_M, TIP_Z - BACK_M]
 OUT = Path(__file__).resolve().parent / "calibration" / "T_tool_cam.json"
 
 
