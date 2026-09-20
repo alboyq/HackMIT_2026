@@ -72,11 +72,15 @@ class OpenYAMFeedEnv(gym.Env):
         self.tip_ahead = None        # fingertip distance past the TCP, measured off the model
         self.was_lifted = False
         self.pinch_paid = False
-        self._bank = []              # recent hand-off states, see reset()
+        self._bank = []
+        self._last_seen = {}         # what the wrist camera last reported, per target
+        self.seen = {}               # and whether it can see each one right now
+              # recent hand-off states, see reset()
 
         self.scene = YamScene(objects=list(OBJECTS))
         self.model, self.data = self.scene.model, self.scene.data
         self.tool = ToolFrame(self.model)
+        self.wrist_cam = self.model.camera("wrist_cam").id
 
         self.jids = np.asarray([self.model.joint(n).id for n in ARM_JOINTS])
         self.qadr = np.asarray([self.model.jnt_qposadr[j] for j in self.jids])
@@ -213,7 +217,28 @@ class OpenYAMFeedEnv(gym.Env):
         self.mouth_bias = self.np_random.normal(0, float(n["mouth_bias_m"]), 3)
         self.width_bias = float(self.np_random.normal(0, float(n["width_rel"])))
 
+    def _in_wrist_view(self, point) -> bool:
+        """Inside the wrist camera's field of view and in front of the lens. MuJoCo cameras look
+        down their own -z. Occlusion by the claws is not modelled."""
+        R = self.data.cam_xmat[self.wrist_cam].reshape(3, 3)
+        q = R.T @ (np.asarray(point) - self.data.cam_xpos[self.wrist_cam])
+        if q[2] > -0.02:
+            return False
+        half = np.radians(0.5 * float(self.model.cam_fovy[self.wrist_cam]))
+        return bool(abs(np.arctan2(q[0], -q[2])) <= half and abs(np.arctan2(q[1], -q[2])) <= half)
+
     def _perceived(self, true_point, bias, jitter_key):
+        # The ONLY sensor is the wrist camera. Out of its view there is no new measurement, so the
+        # policy keeps what it last saw (the first observation of an episode stands in for the
+        # initial look at the table). Before this, it was told the position even with the camera
+        # pointing the other way.
+        self.seen[jitter_key] = self._in_wrist_view(true_point)
+        if not self.seen[jitter_key] and jitter_key in self._last_seen:
+            return self._last_seen[jitter_key]
+        self._last_seen[jitter_key] = self._perceived_now(true_point, bias, jitter_key)
+        return self._last_seen[jitter_key]
+
+    def _perceived_now(self, true_point, bias, jitter_key):
         """Eye-in-hand error shrinks with range: the same pixel error is fewer millimetres when
         the lens is close, and the table-plane depth assumption is least wrong up close."""
         n = self.cfg.get("perception_noise", {})
@@ -336,6 +361,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self._sample_perception_bias()
+        self._last_seen = {}
         self.object_start = self.scene.object_pos(self.name).copy()
 
     def _begin_stage(self, stage: str) -> None:
@@ -439,6 +465,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.knocked = self.was_pinched = False
         self.peak_velocity = self.peak_grip_force = 0.0
         self._sample_perception_bias()
+        self._last_seen = {}
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
@@ -782,7 +809,9 @@ class OpenYAMFeedEnv(gym.Env):
                 "knocked": bool(self.knocked), "lost": bool(lost), "failed": bool(failed),
                 "lift_m": height, "stage_drift_m": stage_drift, "tilt_deg": tilt_deg,
                 "off_square_deg": float(off_square_deg), "seat_frac": seat_frac, "e_jaw_m": e_jaw, "e_pad_m": e_pad,
-                "centred": bool(centred), "oriented": bool(oriented)}
+                "centred": bool(centred), "oriented": bool(oriented),
+                "object_in_view": bool(self.seen.get("object_jitter_m", False)),
+                "mouth_in_view": bool(self.seen.get("mouth_jitter_m", False))}
         return self._observation(), float(reward), bool(success or failed), bool(truncated), info
 
     def render(self):

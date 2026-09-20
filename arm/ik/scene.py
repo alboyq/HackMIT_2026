@@ -158,7 +158,11 @@ def _patched_arm() -> Path:
     # 6 cm back along the tool, aimed just past the TCP. Chosen by mj_ray line-of-sight
     # test over a grid of mounts: this one sees the TCP and points 5 and 12 cm in front of it
     # with no gripper geometry in the way (19 of 84 candidate mounts were clear).
-    cam = (f'<camera name="wrist_cam" pos="0 -0.0816 0.0537" xyaxes="1 0 0 0 -0.96607 0.25829" '
+    # Re-mounted for the centred claws, like the real arm: on a bracket above the gripper housing
+    # (off to the side of the jaw axis, which is link_6 x), 6 cm up the tool (clear of the housing), tilted in so it looks
+    # along the claws at a point 5 cm past the grasp point. The old mount was aimed past the stock
+    # fingers' TCP, 44 mm off-axis, which no longer exists.
+    cam = (f'<camera name="wrist_cam" pos="0 -0.065 0.06" xyaxes="1 0 0 0 -0.838 0.545" '
            f'fovy="{WRIST_FOVY:g}" resolution="{CAM_RES} {CAM_RES}"/>\n                  ')
     src = src.replace(anchor, cam + anchor, 1)
     # Grip strength. The menagerie model gives the finger position actuator kp=100, which
