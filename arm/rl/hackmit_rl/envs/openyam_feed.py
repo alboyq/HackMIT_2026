@@ -535,7 +535,11 @@ class OpenYAMFeedEnv(gym.Env):
         # frozen policy trained at full speed, so it is left alone.
         size_factor = 1.0
         if self.stage != "reach":
-            size_factor = float(np.clip(self.width[self.name] / float(self.ecfg.get("full_size_width_m", 0.05)),
+            # The arm does not know the size beforehand. The slowdown is a CONTROLLER decision, so it
+            # runs on the width the wrist camera reports (same +-10% error the policy sees), never on
+            # the simulator's true width.
+            seen_width = float(self.width[self.name]) * (1.0 + self.width_bias)
+            size_factor = float(np.clip(seen_width / float(self.ecfg.get("full_size_width_m", 0.05)),
                                         float(self.ecfg.get("small_min_factor", 1.0)), 1.0))
         max_delta = cap * self.dt * size_factor
         desired = self.data.ctrl[:6] + np.clip(
@@ -590,7 +594,9 @@ class OpenYAMFeedEnv(gym.Env):
         self.collisions += table_hits
         self.self_collisions += self_hits
         grip_force = self._grip_force()
-        crush_limit = float(self.ecfg["max_grip_force_n"]) * size_factor
+        true_factor = float(np.clip(self.width[self.name] / float(self.ecfg.get("full_size_width_m", 0.05)),
+                                    float(self.ecfg.get("small_min_factor", 1.0)), 1.0))
+        crush_limit = float(self.ecfg["max_grip_force_n"]) * true_factor
         crushing = grip_force > crush_limit
         self.crush_steps += int(crushing)
         self.peak_grip_force = max(self.peak_grip_force, grip_force)
