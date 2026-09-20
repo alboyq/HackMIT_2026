@@ -1,11 +1,11 @@
 """Decode a canlog.py capture: MIT commands (id 1-6) and motor replies (id 0x11-0x16)."""
-import sys, numpy as np
+import gzip, sys, numpy as np
 SPEC = {1:(12.5,10,28),2:(12.5,10,28),3:(12.5,10,28),4:(12.5,30,10),5:(12.5,30,10),6:(12.5,30,10)}     # p_max, v_max, t_max
 ERR = {0:"disabled",1:"normal",8:"overvolt",9:"undervolt",10:"overcurrent",11:"MOS overtemp",12:"coil overtemp",13:"comm loss",14:"overload"}
 u2f = lambda u, lo, hi, b: u * (hi - lo) / ((1 << b) - 1) + lo
 def load(path):
     cmds, fb, other = {i: [] for i in range(1, 7)}, {i: [] for i in range(1, 7)}, 0
-    for line in open(path):
+    for line in (gzip.open(path, "rt") if str(path).endswith(".gz") else open(path)):
         t, i, h = line.split(); t, i, d = float(t), int(i, 16), bytes.fromhex(h)
         if 1 <= i <= 6 and len(d) == 8:
             if d[:7] == b"\xff" * 7: cmds[i].append((t, "special", d[7])); continue
