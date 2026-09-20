@@ -41,10 +41,69 @@ Use `google-deepmind/mujoco_menagerie/i2rt_yam/yam.xml` for the shared simulatio
 
 - Photograph/record the arm revision label and every motor/gripper model.
 - Confirm CAN IDs, bitrate, control mode, timeout register, and gripper polarity/range read-only.
-- Measure model-vs-hardware joint signs and zero offsets one joint at a time while unpowered/safely supported.
-- Compare SDK FK and model FK at at least five static poses; require TCP error under 10 mm before Cartesian commands.
+- ~~Measure model-vs-hardware joint signs and zero offsets one joint at a time while unpowered/safely supported.~~ **DONE 2026-09-19** — see "Measured joint map" below and `joint_map_measured.json`.
+- Compare SDK FK and model FK at at least five static poses; require TCP error under 10 mm before Cartesian commands. **STILL OUTSTANDING — this is the remaining gate before `RealArm` gets a backend.**
 - Measure actual gripper opening, calibration endpoints, safe force setting, and whether the wrist camera changes the end-effector mass.
 - Confirm base frame orientation, table height, reachable workspace, mechanical stops, E-stop behavior, and the correct procedure for safely lowering while powered.
+
+## Measured joint map (2026-09-19)
+
+Hand-measured on the real arm. **Motors were disabled for the entire session** — every frame sent
+was a zero MIT command (`kp=kd=torque=0`) and `enable()` was never called, so nothing was ever
+energised. Signs came from moving one joint by hand and reading the encoder delta; offsets from
+both mechanical hard stops per joint. Full data, per-joint stop values and method in
+[`joint_map_measured.json`](joint_map_measured.json).
+
+**Convention: `q_model = sign * q_encoder - offset` (radians).**
+
+| joint | motor | sign | offset (rad) | offset (deg) | range vs MJCF | confidence |
+|---|---|---|---|---|---|---|
+| J1 | `0x01` | +1 | **-1.4313** | **-82.00** | -2.1 deg | high |
+| J2 | `0x02` | +1 | +0.0044 | +0.25 | +1.5 deg | high |
+| J3 | `0x03` | +1 | +0.0101 | +0.58 | **+16.1 deg** | **see caveat** |
+| J4 | `0x04` | +1 | -0.0074 | -0.43 | +10.8 deg | high |
+| J5 | `0x05` | +1 | +0.0015 | +0.09 | +0.8 deg | high |
+| J6 | `0x06` | +1 | **+1.3035** | **+74.69** | -1.0 deg | high |
+
+**All six signs are +1.** Two joints carry large zero offsets: **J1 (base yaw, -82 deg)** and
+**J6 (gripper roll, +75 deg)**. Commanding MJCF joint values straight to this hardware would point
+the whole arm ~82 deg off heading with the jaws rolled ~75 deg — at opposite ends of the chain,
+and invisible in simulation. Do not skip the offsets.
+
+### Possible error — J3 is not fully pinned
+
+J3's measured range is **16.1 deg wider** than the MJCF's, so its two hard stops do not determine
+the offset arithmetically. Two readings are consistent with the measurements:
+
+- **`offset = +0.0101`** (adopted) — assumes the lower stop maps to the model minimum. J2 is the
+  same joint family with the same model range and behaves exactly this way, landing 0.25 deg from
+  the model zero; J3 lands 0.58 deg from it. The extra 16 deg would then all sit at the top of the
+  range, which is where a removed I2RT software safety buffer would appear.
+- **`offset = +0.1509` (+8.65 deg)** — assumes the midpoints align. This would require J3's zero to
+  be displaced in a way no other joint on this arm is.
+
+The FK check separates them cleanly: an 8.65 deg elbow error is roughly **4 cm** at the gripper.
+Treat J3's offset as provisional until then. The low stop was re-verified by hand and did not move
+under firm pressure.
+
+Ranges exceeding the MJCF on J2/J3/J4/J5 are expected rather than anomalous — this file already
+records that I2RT applies a software safety buffer, and that this Anvil OpenYAM is of an
+unpublished revision relative to the standard I2RT YAM the MJCF derives from. A wider real range is
+the safe direction: the planner uses MJCF limits and never asks for the extra travel.
+
+### Still to complete before `RealArm` gets a backend
+
+1. **FK check at five static poses, TCP error under 10 mm.** The remaining gate. Also resolves J3.
+2. **Gripper pad force.** `0x08` reads `TMAX = 10.0 Nm`, but that is motor torque and the scaling
+   for MIT torque commands — not pad force. Converting needs the `linear_4310` rack-and-pinion
+   geometry (meshes vendored at `third_party/i2rt/i2rt/robot_models/gripper/`). The sim's `kp=800`
+   (~10 N/pad) remains unvalidated against hardware.
+3. **Confirm base frame orientation, table height and reachable workspace** against the measured map.
+4. **Secure the CAN adapter.** It re-enumerated **three times** during this session (USB device
+   005 -> 006 -> 007). With `TIMEOUT=0` a motor holds its last command forever if the host stops
+   talking, and a USB disconnect is the one failure where disable-on-exit cannot run — the host
+   cannot send the disable frame on a bus that no longer exists. This is harmless with motors
+   disabled and unacceptable once anything is energised.
 
 ## Open questions
 
