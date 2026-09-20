@@ -42,7 +42,7 @@ Use `google-deepmind/mujoco_menagerie/i2rt_yam/yam.xml` for the shared simulatio
 - Photograph/record the arm revision label and every motor/gripper model.
 - Confirm CAN IDs, bitrate, control mode, timeout register, and gripper polarity/range read-only.
 - ~~Measure model-vs-hardware joint signs and zero offsets one joint at a time while unpowered/safely supported.~~ **DONE 2026-09-19** — see "Measured joint map" below and `joint_map_measured.json`.
-- Compare SDK FK and model FK at at least five static poses; require TCP error under 10 mm before Cartesian commands. **STILL OUTSTANDING — this is the remaining gate before `RealArm` gets a backend.**
+- ~~Compare SDK FK and model FK at at least five static poses; require TCP error under 10 mm before Cartesian commands.~~ **DONE 2026-09-19/20 (provisional)** — worst dot-to-dot error 7.9 mm over ten distances; see "FK check result" below and `fk_check/`. Still needed before Cartesian commands: the startup step described under "Still to complete".
 - Measure actual gripper opening, calibration endpoints, safe force setting, and whether the wrist camera changes the end-effector mass.
 - Confirm base frame orientation, table height, reachable workspace, mechanical stops, E-stop behavior, and the correct procedure for safely lowering while powered.
 
@@ -60,7 +60,7 @@ both mechanical hard stops per joint. Full data, per-joint stop values and metho
 |---|---|---|---|---|---|---|
 | J1 | `0x01` | +1 | **-1.4313** | **-82.00** | -2.1 deg | high |
 | J2 | `0x02` | +1 | +0.0044 | +0.25 | +1.5 deg | high |
-| J3 | `0x03` | +1 | +0.0101 | +0.58 | **+16.1 deg** | **see caveat** |
+| J3 | `0x03` | +1 | +0.0101 | +0.58 | **+16.1 deg** | confirmed by the FK check |
 | J4 | `0x04` | +1 | -0.0074 | -0.43 | +10.8 deg | high |
 | J5 | `0x05` | +1 | +0.0015 | +0.09 | +0.8 deg | high |
 | J6 | `0x06` | +1 | **+1.3035** | **+74.69** | -1.0 deg | high |
@@ -70,40 +70,83 @@ both mechanical hard stops per joint. Full data, per-joint stop values and metho
 the whole arm ~82 deg off heading with the jaws rolled ~75 deg — at opposite ends of the chain,
 and invisible in simulation. Do not skip the offsets.
 
-### Possible error — J3 is not fully pinned
+### J3 — resolved by the FK check
+J3's range is 16 deg wider than the MJCF's, so its hard stops alone did not pin the offset; the
+lower-stop reading (`+0.0101`) was adopted. The FK check settled it: with the alternative midpoint
+offset (`+0.1509`) the worst dot-to-dot error is **35 mm** (rms ~19 mm) against **7.9 mm** for the
+adopted value. The extra 16 deg of travel is most likely a removed I2RT software safety buffer.
+Ranges exceeding the MJCF on J2/J3/J4/J5 are expected: this file records that I2RT applies a
+software buffer and that this Anvil OpenYAM is of an unpublished revision.
 
-J3's measured range is **16.1 deg wider** than the MJCF's, so its two hard stops do not determine
-the offset arithmetically. Two readings are consistent with the measurements:
+### Encoder lap rule — read this before driving anything
+The motors are single-turn absolute encoders (Damiao datasheet: "absolute position of the output
+shaft in a single turn"; i2rt says the same), so a reading is only defined modulo one turn, and
+**neither vendor documents which lap is reported after power-up**. After the arm was power-cycled
+in the venue move, **J2 and J3 came back exactly one lap (2π) lower** than when the map was
+measured (raw −6.28 / −6.19 at rest; +2π gives +0.004 / +0.09); J1, J4, J5, J6 were unchanged.
+Nothing flags it — the number is plausible.
 
-- **`offset = +0.0101`** (adopted) — assumes the lower stop maps to the model minimum. J2 is the
-  same joint family with the same model range and behaves exactly this way, landing 0.25 deg from
-  the model zero; J3 lands 0.58 deg from it. The extra 16 deg would then all sit at the top of the
-  range, which is where a removed I2RT software safety buffer would appear.
-- **`offset = +0.1509` (+8.65 deg)** — assumes the midpoints align. This would require J3's zero to
-  be displaced in a way no other joint on this arm is.
+Rule: for each joint pick the whole number of turns `k` in [−3, 3] such that
+`lo − 0.15 ≤ raw + 2πk ≤ hi + 0.15`, where `[lo, hi]` is that joint's measured hard-stop range
+(`joint_map_measured.json` → `encoder_wrap`). Exactly one `k` fits because every window is
+narrower than 2π (widest: J1, 5.94 rad); if none or several fit, refuse the reading. Then
+`q_model = sign * (raw + 2πk) − offset`. `fk_check/fk_capture.py` is a working implementation.
 
-The FK check separates them cleanly: an 8.65 deg elbow error is roughly **4 cm** at the gripper.
-Treat J3's offset as provisional until then. The low stop was re-verified by hand and did not move
-under firm pressure.
+What breaks without it (all seen, none energised):
+- `move_and_hold.py --preset home --dry-run` after the power cycle planned **j2 +6.329, j3 +6.242 rad**
+  of travel (the shoulder's real range is ~3.7 rad); `--preset vertical` planned j2 +7.846, j3 +9.085.
+  `move_to` checks only the *goal* against its limits, not the start pose, so both were accepted.
+- The openyam driver's `ArmConfig.joint_limits` apply the MJCF ranges (±0.15) straight to encoder
+  values — the wrong frame for J1 (allows up to +3.29 against a real stop at +1.60) and J6 (allows
+  down to −2.24 against a real stop at −0.78).
 
-Ranges exceeding the MJCF on J2/J3/J4/J5 are expected rather than anomalous — this file already
-records that I2RT applies a software safety buffer, and that this Anvil OpenYAM is of an
-unpublished revision relative to the standard I2RT YAM the MJCF derives from. A wider real range is
-the safe direction: the planner uses MJCF limits and never asks for the extra travel.
+### FK check result (2026-09-19/20)
+Five pen dots on paper; dots 2 and 3 each touched from several arm configurations. Encoders read
+with the arm held by hand and the motors disabled. The tool tip was fitted from the multi-touch
+dots (pivot calibration) because the corrected `linear_4310` model was not on the GX10 yet;
+predicted dot-to-dot distances were compared with ruler/caliper distances.
+
+- **Ten distances: worst error 7.9 mm, rms 4.4 mm — inside the 10 mm gate.** The six pairs that
+  do not involve dot 3 are within 2.7 mm.
+- Fitted tool tip: (−7.1, 3.3, 147.8) mm in the `link_6` frame — about 148 mm along the wrist axis
+  and nearly on it (the stock crank_4310 tool point is 75 mm out and 44 mm off-axis). Anything
+  that needs the TCP in the base frame (e.g. `arm/calibrate_extrinsic.py`) should use this, or the
+  corrected model's tool point.
+- Dot 3 comes out 6–8 mm long on all four of its pairs. Two captures of it with different wrist
+  angles agree to 3.1 mm, and refitting the tip with and without them moves it 1.8 mm, so it is
+  neither hand movement nor a left/right inconsistency; most likely pen mark vs pad position.
+- **Limits.** Distances cannot see a J1 offset (rotation about the base axis) or a J6 offset
+  (rotation about the tool axis), so those two rest on the hard-stop measurements (ranges matched
+  the MJCF to 1–2 deg). The tool tip is fitted, not from the corrected model — re-run
+  `python fk_check/fk_analyse.py --tip X,Y,Z` with that model's tool point.
+- Data and scripts: `fk_check/` (also on `main`).
+
+### Mounting orientation
+The sim's +x (model J1 = 0, i.e. encoder J1 = −1.4313 rad) is the arm's forward: objects sit 27–44 cm
+ahead (about 16 cm right to 22 cm left) and the user 62 cm straight ahead facing the arm. The
+unreachable ~37 deg wedge is directly behind forward. What the arrow on the real base marks (sim
+forward, or the motor zero, 82 deg away on J1) has **not** been determined. On the 2026-09-19/20
+bench the arm could not be taken further left than a tip bearing of about +8 deg (something on the
+table — the base joint itself has ~170 deg of travel that way), so the sim's left-hand objects
+(up to ~29 deg) may not be reachable in that layout.
 
 ### Still to complete before `RealArm` gets a backend
-
-1. **FK check at five static poses, TCP error under 10 mm.** The remaining gate. Also resolves J3.
-2. **Gripper pad force.** `0x08` reads `TMAX = 10.0 Nm`, but that is motor torque and the scaling
-   for MIT torque commands — not pad force. Converting needs the `linear_4310` rack-and-pinion
-   geometry (meshes vendored at `third_party/i2rt/i2rt/robot_models/gripper/`). The sim's `kp=800`
-   (~10 N/pad) remains unvalidated against hardware.
-3. **Confirm base frame orientation, table height and reachable workspace** against the measured map.
-4. **Secure the CAN adapter.** It re-enumerated **three times** during this session (USB device
-   005 -> 006 -> 007). With `TIMEOUT=0` a motor holds its last command forever if the host stops
-   talking, and a USB disconnect is the one failure where disable-on-exit cannot run — the host
-   cannot send the disable frame on a bus that no longer exists. This is harmless with motors
-   disabled and unacceptable once anything is energised.
+1. **Startup step**: apply the lap rule and put the software limits (just inside the measured stops)
+   in the motor's *current* numbers before anything moves; fix the driver's limit frame for J1/J6 and
+   make `move_to` check the start pose. `move_and_hold.py` presets are in raw encoder numbers and are
+   unsafe until then.
+2. **Re-run the FK check with the corrected `linear_4310` tool point** (`fk_analyse.py --tip`).
+3. **Gripper pad force.** `0x08` reads `TMAX = 10 Nm` — motor torque, not pad force. The sim's
+   `kp=800` (~10 N/pad) is unvalidated against hardware.
+4. **CAN adapter.** It re-enumerated about six times over two sessions and `can0` falls to DOWN each
+   time. With `TIMEOUT=0` a USB drop leaves the motors holding their last command and disable-on-exit
+   cannot run. `openyam/CLAUDE.md` also notes the CANable's **GND screw terminal is unlanded**
+   (suspected cause of bus trouble): land it to the PDU 0 V with both sides powered down, and secure
+   the cable, before any powered session.
+5. **Physical checks not yet done**: photograph the revision label and motor models; gripper
+   opening, calibration endpoints and safe force; wrist camera mass; table height and reachable
+   workspace; E-stop behaviour; the procedure for lowering safely while powered.
+6. **Mounting orientation** (see above).
 
 ## Open questions
 

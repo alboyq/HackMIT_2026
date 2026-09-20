@@ -1,94 +1,278 @@
 {
   "_comment": "G2 sim-to-real joint map for the OpenYAM arm on gx10-f3f2.",
-  "_measured": "2026-09-19 evening, hand-measured with motors DISABLED (zero MIT frames, enable() never called).",
-  "_convention": "q_model = sign * q_encoder - offset       (radians)",
+  "_measured": "2026-09-19 evening (signs, offsets, hard stops) and 2026-09-19/20 night (FK check), hand-measured with motors DISABLED (zero MIT frames, enable() never called).",
+  "_convention": "q_model = sign * (q_encoder + 2*pi*lap) - offset   (radians; 'lap' from the encoder_wrap rule below)",
   "_model": "mujoco_menagerie/i2rt_yam/yam.xml",
   "_adapter": "canable2 gs_usb, serial 005200594845501820303750, can0 @ 1 Mbit/s",
-
   "joints": {
     "joint1": {
-      "motor_id": "0x01", "model": "DM4340", "sign": 1,
-      "offset": -1.4313, "offset_deg": -82.00,
-      "stops_encoder": [-4.0309, 1.6047],
-      "range_rad": 5.6356, "range_deg": 322.89,
-      "model_range_rad": 5.6723, "model_range_deg": 325.00,
+      "motor_id": "0x01",
+      "model": "DM4340",
+      "sign": 1,
+      "offset": -1.4313,
+      "offset_deg": -82.0,
+      "stops_encoder": [
+        -4.0309,
+        1.6047
+      ],
+      "range_rad": 5.6356,
+      "range_deg": 322.89,
+      "model_range_rad": 5.6723,
+      "model_range_deg": 325.0,
       "range_delta_deg": -2.11,
       "limit_fit_err_deg": 1.05,
       "confidence": "high",
       "note": "Large offset. Base yaw - an 82 deg error points the whole arm the wrong way."
     },
     "joint2": {
-      "motor_id": "0x02", "model": "DM4340", "sign": 1,
-      "offset": 0.0044, "offset_deg": 0.25,
-      "stops_encoder": [0.0044, 3.6952],
-      "range_rad": 3.6908, "range_deg": 211.47,
-      "model_range_rad": 3.6652, "model_range_deg": 210.00,
+      "motor_id": "0x02",
+      "model": "DM4340",
+      "sign": 1,
+      "offset": 0.0044,
+      "offset_deg": 0.25,
+      "stops_encoder": [
+        0.0044,
+        3.6952
+      ],
+      "range_rad": 3.6908,
+      "range_deg": 211.47,
+      "model_range_rad": 3.6652,
+      "model_range_deg": 210.0,
       "range_delta_deg": 1.47,
       "limit_fit_err_deg": 1.47,
       "confidence": "high",
       "note": "Lower stop lands on model minimum exactly."
     },
     "joint3": {
-      "motor_id": "0x03", "model": "DM4340", "sign": 1,
-      "offset": 0.0101, "offset_deg": 0.58,
-      "stops_encoder": [0.0101, 3.9569],
-      "range_rad": 3.9468, "range_deg": 226.13,
-      "model_range_rad": 3.6652, "model_range_deg": 210.00,
+      "motor_id": "0x03",
+      "model": "DM4340",
+      "sign": 1,
+      "offset": 0.0101,
+      "offset_deg": 0.58,
+      "stops_encoder": [
+        0.0101,
+        3.9569
+      ],
+      "range_rad": 3.9468,
+      "range_deg": 226.13,
+      "model_range_rad": 3.6652,
+      "model_range_deg": 210.0,
       "range_delta_deg": 16.13,
-      "confidence": "likely correct, pending FK check",
-      "note": "Real range is 16 deg WIDER than the model, so stops alone do not pin the offset arithmetically. Offset assumes the lower stop maps to the model minimum. Evidence for that reading: joint2 is the same joint family with the same model range [0, 210 deg], also rests at its lower stop, and lands 0.25 deg from the model zero - joint3 lands 0.58 deg from it. The midpoint alternative (+0.1509 rad, +8.65 deg) would require joint3's zero to be displaced in a way no other joint on this arm is. The extra 16 deg is most likely all at the TOP of the range, which is where a removed I2RT software safety buffer would appear. Low stop re-verified by hand: did not move under firm pressure. Confirm with the five-pose FK check - an 8.65 deg elbow error is roughly 4 cm at the gripper, so the check separates the two readings cleanly."
+      "confidence": "confirmed by the FK check (2026-09-19/20)",
+      "note": "Real range is 16 deg wider than the model, so the stops alone did not pin the offset. The lower-stop reading was adopted (joint2 behaves identically). The FK check settled it: with the alternative midpoint offset (+0.1509 rad) the worst dot-to-dot error is 35 mm (rms ~19 mm) against 7.9 mm for the adopted +0.0101 - alternative rejected. The extra 16 deg of travel is most likely a removed I2RT software safety buffer at the top of the range."
     },
     "joint4": {
-      "motor_id": "0x04", "model": "DM4310", "sign": 1,
-      "offset": -0.0074, "offset_deg": -0.43,
-      "stops_encoder": [-1.6726, 1.6577],
-      "range_rad": 3.3303, "range_deg": 190.81,
-      "model_range_rad": 3.1416, "model_range_deg": 180.00,
+      "motor_id": "0x04",
+      "model": "DM4310",
+      "sign": 1,
+      "offset": -0.0074,
+      "offset_deg": -0.43,
+      "stops_encoder": [
+        -1.6726,
+        1.6577
+      ],
+      "range_rad": 3.3303,
+      "range_deg": 190.81,
+      "model_range_rad": 3.1416,
+      "model_range_deg": 180.0,
       "range_delta_deg": 10.81,
       "confidence": "high",
       "note": "Offset ~0. Real joint travels 5.4 deg further each way than the MJCF permits; model limits are conservative, which is the safe direction."
     },
     "joint5": {
-      "motor_id": "0x05", "model": "DM4310", "sign": 1,
-      "offset": 0.0015, "offset_deg": 0.09,
-      "stops_encoder": [-1.5761, 1.5791],
-      "range_rad": 3.1552, "range_deg": 180.78,
-      "model_range_rad": 3.1416, "model_range_deg": 180.00,
+      "motor_id": "0x05",
+      "model": "DM4310",
+      "sign": 1,
+      "offset": 0.0015,
+      "offset_deg": 0.09,
+      "stops_encoder": [
+        -1.5761,
+        1.5791
+      ],
+      "range_rad": 3.1552,
+      "range_deg": 180.78,
+      "model_range_rad": 3.1416,
+      "model_range_deg": 180.0,
       "range_delta_deg": 0.78,
       "limit_fit_err_deg": 0.39,
       "confidence": "high",
       "note": "Best agreement of any joint."
     },
     "joint6": {
-      "motor_id": "0x06", "model": "DM4310", "sign": 1,
-      "offset": 1.3035, "offset_deg": 74.69,
-      "stops_encoder": [-0.7822, 3.3892],
-      "range_rad": 4.1714, "range_deg": 239.00,
-      "model_range_rad": 4.1888, "model_range_deg": 240.00,
-      "range_delta_deg": -1.00,
-      "limit_fit_err_deg": 0.50,
+      "motor_id": "0x06",
+      "model": "DM4310",
+      "sign": 1,
+      "offset": 1.3035,
+      "offset_deg": 74.69,
+      "stops_encoder": [
+        -0.7822,
+        3.3892
+      ],
+      "range_rad": 4.1714,
+      "range_deg": 239.0,
+      "model_range_rad": 4.1888,
+      "model_range_deg": 240.0,
+      "range_delta_deg": -1.0,
+      "limit_fit_err_deg": 0.5,
       "confidence": "high",
       "note": "Large offset. Gripper roll - a 75 deg error mis-orients the jaws at the point nearest the person. Negative stop measured twice independently (-0.7856, -0.7822)."
     }
   },
-
   "gripper": {
-    "motor_id": "0x08", "model": "DM4310",
+    "motor_id": "0x08",
+    "model": "DM4310",
     "TMAX_Nm": 10.0,
     "note": "TMAX is the motor torque ceiling and the scaling for MIT torque commands. NOT pad force - converting needs the linear_4310 transmission geometry. The sim's kp=800 (~10 N/pad) is still unvalidated against hardware."
   },
-
   "method": {
     "signs": "Arm limp, motors disabled. Moved one joint by hand in a known physical direction and read the encoder delta. J5 and J6 used a judgement-free variant: rotate a joint whose axis is parallel/anti-parallel to J1's, move both the same physical way, compare encoder signs.",
     "offsets": "Both mechanical hard stops per joint, by hand. Offset = measured midpoint minus model midpoint, cross-checked by mapping each stop onto the corresponding MJCF limit.",
     "lesson": "One stop is not enough. A single J6 stop suggested a 75 deg narrower range; the second stop showed the range matches and the joint is shifted instead."
   },
-
   "_on_ranges_exceeding_the_model": "Four joints (J2 +1.5, J3 +16.1, J4 +10.8, J5 +0.8 deg) have MORE mechanical travel than the MJCF allows. This is expected, not an anomaly: ARM_NOTES records that I2RT applies an additional software safety buffer, and that this Anvil OpenYAM is of an unpublished revision relative to the standard I2RT YAM the MJCF derives from. A wider real range is the safe direction - the planner uses MJCF limits and simply never asks for the extra travel.",
-
   "outstanding": [
-    "joint3 offset: lower-stop reading adopted, pending confirmation by the five-pose FK check (< 10 mm TCP error) before RealArm gets a backend.",
-    "Gripper pad force unmeasured; need linear_4310 linkage spec or a direct scale measurement.",
-    "CAN adapter re-enumerated 3x during this session. With TIMEOUT=0 the motors hold their last command forever if the host stops talking, and a USB drop is the one failure where disable-on-exit cannot run. Secure the cable before any powered session."
-  ]
+    "Re-run fk_check/fk_analyse.py with the corrected linear_4310 tool point (--tip) once make_arm_linear4310.py has been built on the GX10.",
+    "Startup module for the real arm backend: apply the lap rule and put the software limits (just inside the measured stops) in the motor's CURRENT numbers before anything moves; the openyam driver's limits are in the wrong frame for J1/J6 and its move_to does not check the start pose.",
+    "J1 and J6 offsets are not covered by the FK distance check (see fk_check.limits); optional independent J1 check by dot bearing.",
+    "Gripper pad force unmeasured (the motor's TMAX = 10 Nm is torque, not force); needs the linear_4310 rack geometry or a scale reading. The sim's kp=800 (~10 N/pad) is unvalidated against hardware.",
+    "CAN adapter: it re-enumerated about six times over two sessions and can0 falls to DOWN whenever it does. With TIMEOUT=0 a USB drop leaves the motors holding their last command and disable-on-exit cannot run. openyam/CLAUDE.md also notes the CANable's GND screw terminal is unlanded (suspected cause of bus trouble): land it to the PDU 0 V with both sides powered down, and secure the cable, before any powered session.",
+    "Physical checks from ARM_NOTES.md not yet done: photograph the revision label and motor models; gripper opening, calibration endpoints and safe force; wrist camera mass; table height and reachable workspace; E-stop behaviour; the procedure for lowering safely while powered.",
+    "Mounting orientation: decide what the base arrow marks and how the arm should face the table (see mounting_orientation)."
+  ],
+  "encoder_wrap": {
+    "problem": "The motors report position modulo one turn. After the arm was power-cycled (venue move, 2026-09-19) J2 and J3 came back exactly one lap lower than in the session that measured the map (raw -6.28 / -6.19 at rest; +2*pi gives +0.004 / +0.09). J1, J4, J5, J6 were unchanged. Every FK-check capture needed lap +1 on J2 and J3. Nothing flags it: the reading is a plausible number.",
+    "rule": "For each joint find the whole number of turns k in [-3, 3] such that lo - 0.15 <= raw + 2*pi*k <= hi + 0.15 (+/- 1e-9), where [lo, hi] is that joint's measured hard-stop range below. Exactly one k fits, because every window is narrower than 2*pi (the widest is J1 at 5.94 rad). If none or several fit, refuse to use the reading.",
+    "then": "q_model = sign * (raw + 2*pi*k) - offset   (every sign is +1)",
+    "reference_implementation": "fk_check/fk_capture.py (does the lap step and refuses ambiguous readings)",
+    "windows_are_at_lap_0_of_the_measuring_session": {
+      "joint1": [
+        -4.0309,
+        1.6047
+      ],
+      "joint2": [
+        0.0044,
+        3.6952
+      ],
+      "joint3": [
+        0.0101,
+        3.9569
+      ],
+      "joint4": [
+        -1.6726,
+        1.6577
+      ],
+      "joint5": [
+        -1.5761,
+        1.5791
+      ],
+      "joint6": [
+        -0.7822,
+        3.3892
+      ]
+    },
+    "source": "Damiao DM-J4310 datasheet: 'Dual encoders, absolute position of the output shaft in a single turn' (14-bit, magnetic, single-turn). i2rt motors page says the same. Neither says which lap is reported after power-up, so it must be re-determined every session.",
+    "consequences_seen": {
+      "raw_readings_into_the_map": "applying the offsets to a raw reading without the lap step puts J2/J3 a full turn (360 deg) off",
+      "openyam_move_and_hold_presets": "dry-run after the power cycle: --preset home planned j2 +6.329 and j3 +6.242 rad of travel (the shoulder's real range is ~3.7 rad); --preset vertical planned j2 +7.846, j3 +9.085 rad. The limit check only tests the goal, not the start, so it accepted both.",
+      "openyam_driver_limits": "ArmConfig.joint_limits applies the MJCF ranges (+/-0.15) directly to encoder values, i.e. in the wrong frame for J1 (allows up to +3.29 against a real stop at +1.60) and J6 (allows down to -2.24 against a real stop at -0.78)."
+    },
+    "do_not": "Do not move the arm with a script that uses raw encoder numbers or model numbers until the lap rule and limits in the motor's current frame are applied."
+  },
+  "fk_check": {
+    "result": "PASS (provisional - see limits)",
+    "gate": "TCP error under 10 mm at five static poses (ARM_NOTES.md)",
+    "method": "Five pen dots on paper (dots 2 and 3 each touched from two or three arm configurations). At each pose the arm was held by hand with the pads on the dot and the encoders were read with the motors disabled. The tool tip was fitted from the multi-touch dots (pivot calibration) because the corrected linear_4310 gripper model was not available on the GX10. Predicted dot-to-dot distances were compared with ruler/caliper distances.",
+    "tool_tip_link6_mm": [
+      -7.1,
+      3.3,
+      147.8
+    ],
+    "tool_tip_note": "about 148 mm along the wrist axis and nearly on it (the stock crank_4310 tool point is 75 mm out and 44 mm off-axis). Fit uncertainty ~+/-9 mm per axis at 3 mm placement noise.",
+    "distances": [
+      {
+        "pair": "1-2",
+        "model_mm": 157.3,
+        "ruler_mm": 156,
+        "error_mm": 1.3
+      },
+      {
+        "pair": "1-3",
+        "model_mm": 137.3,
+        "ruler_mm": 131,
+        "error_mm": 6.3
+      },
+      {
+        "pair": "2-3",
+        "model_mm": 145.4,
+        "ruler_mm": 140,
+        "error_mm": 5.4
+      },
+      {
+        "pair": "1-4",
+        "model_mm": 139.2,
+        "ruler_mm": 141,
+        "error_mm": -1.8
+      },
+      {
+        "pair": "2-4",
+        "model_mm": 149.2,
+        "ruler_mm": 149,
+        "error_mm": 0.2
+      },
+      {
+        "pair": "3-4",
+        "model_mm": 237.9,
+        "ruler_mm": 231,
+        "error_mm": 6.9
+      },
+      {
+        "pair": "1-5",
+        "model_mm": 114.7,
+        "ruler_mm": 112,
+        "error_mm": 2.7
+      },
+      {
+        "pair": "4-5",
+        "model_mm": 111.4,
+        "ruler_mm": 112,
+        "error_mm": -0.6
+      },
+      {
+        "pair": "2-5",
+        "model_mm": 225.3,
+        "ruler_mm": 224,
+        "error_mm": 1.3
+      },
+      {
+        "pair": "3-5",
+        "model_mm": 250.9,
+        "ruler_mm": 243,
+        "error_mm": 7.9
+      }
+    ],
+    "worst_error_mm": 7.9,
+    "rms_mm": 4.4,
+    "without_dot3": {
+      "n": 6,
+      "worst_error_mm": 2.7,
+      "rms_mm": 1.5
+    },
+    "j3_alternative_offset": {
+      "offset_rad": 0.1509,
+      "worst_error_mm": 35.1,
+      "verdict": "rejected"
+    },
+    "dot3": "All four dot-3 pairs come out 6-8 mm too long (+6.3, +5.4, +6.9, +7.9). Two captures of dot 3 with different wrist angles agree to 3.1 mm, and fitting the tool tip with and without them moves it only 1.8 mm, so it is neither hand movement nor a left/right inconsistency in the map. Most likely the pen mark and the pad position (or the point measured to) differ by ~6-8 mm on that dot.",
+    "limits": [
+      "Distances between dots cannot see a J1 offset (rotation about the base axis leaves them unchanged) or a J6 offset (rotation about the tool axis; the tip is on that axis). J1 and J6 rest on the hard-stop measurements, whose ranges matched the MJCF to 1-2 deg. An independent J1 check would be the bearing of a dot from the arm's forward line.",
+      "The tool tip is fitted, not taken from the corrected linear_4310 model. Re-run `python fk_check/fk_analyse.py --tip X,Y,Z` with that model's tool point (mm, link_6 frame) and expect agreement within a few mm.",
+      "Hand placement of the pads and pen dots is good to roughly +/-3-5 mm; three of the ruler distances (3-4, 2-5, 3-5) are sums of two caliper segments."
+    ],
+    "data": "fk_check/poses.json (raw encoders, laps, model-frame angles, drift), fk_check/distances.json; reproduce with fk_check/fk_analyse.py"
+  },
+  "mounting_orientation": {
+    "forward": "The sim's +x (model J1 = 0) is the arm's forward, i.e. encoder J1 = -1.4313 rad. The sim puts the objects 27-44 cm ahead (about 16 cm right to 22 cm left) and the user 62 cm straight ahead, facing the arm. The unreachable wedge (~37 deg) is directly behind forward, so the base should sit with its back to the edge of the table it does not need.",
+    "arrow_on_the_base": "What the arrow on the real base marks (sim forward, or the motor zero, which differs from it by 82 deg on J1) has not been determined.",
+    "left_side": "On the 2026-09-19/20 bench the arm could not be taken further left than a tip bearing of about +8 deg (something on the table; the base joint itself has ~170 deg of travel that way). The sim's left-hand objects (up to ~29 deg) may not be reachable in that layout."
+  }
 }
