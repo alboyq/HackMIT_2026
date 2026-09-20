@@ -81,6 +81,11 @@ PAD_ROWS_Z = (0.078, 0.070, 0.060, 0.050, 0.040, 0.030, 0.020)
 # The real claws have rubber pads. MuJoCo uses the larger of the two surfaces' coefficients and
 # everything was 1.0; rubber on plastic/ceramic is 1.0-1.5+. Sliding, then torsional (doubled:
 # resists the object twisting in the grip), then rolling.
+# Width of the gripping face. The stock strip is 12 mm wide over its whole length; the printed claws
+# are a paddle ~5 cm tall at the base tapering to ~12 mm only at the tip (photos). On the 12 mm strip a
+# sphere pinched 4-11 mm off the centreline sat on the plate's EDGE and was squeezed out sideways when
+# the claws were levelled (8/19 dropped). 28 mm is a conservative average of the real taper.
+PLATE_HALF_W = float(os.environ.get("YAM_PLATE_HALF_W", "0.014"))
 PAD_FRICTION = os.environ.get("YAM_PAD_FRICTION", "1.5 0.02 0.001")
 GRIP_KV = float(os.environ.get("YAM_GRIP_KV", "30"))
 
@@ -209,6 +214,10 @@ def _centre_fingers(src: str) -> str:
         linkage = src[r0:d0].replace(blue, 'rgba="0 0 0 0" contype="0" conaffinity="0"')
         finger = (src[d0:d1].replace('class="collision"', f'class="collision" group="2" friction="{PAD_FRICTION}"')
                             .replace(blue, 'rgba="0.13 0.13 0.15 1"'))
+        plate = 'type="box" size="0.006 0.002 0.04"'
+        if finger.count(plate) != 1:
+            raise RuntimeError(f"{ARM_XML}: gripping plate not found on {down} -- model changed?")
+        finger = finger.replace(plate, f'type="box" size="{PLATE_HALF_W:g} 0.002 0.04"')
         first = finger.index("<geom")
         finger = finger[:first] + wedge + finger[first:]
         finger, n = re.subn(r'\s*<geom class="sphere_collision"[^>]*/>', "", finger)
@@ -216,7 +225,7 @@ def _centre_fingers(src: str) -> str:
             raise RuntimeError(f"{ARM_XML}: expected 6 stock pads on {down}, found {n}")
         finger = finger.rstrip() + "".join(
             f'\n                        <geom class="sphere_collision" friction="{PAD_FRICTION}" pos="{x:g} -0.0004 {z:g}"/>'
-            for z in PAD_ROWS_Z for x in (0.003, -0.003)) + "\n                      "
+            for z in PAD_ROWS_Z for x in (0.009, 0.003, -0.003, -0.009)) + "\n                      "
         src = src[:r0] + linkage + finger + src[d1:]
     for mesh in ("model2__14", "model2__15", "model2__16", "model2__17"):
         tag = f'mesh="{mesh}"/>'
