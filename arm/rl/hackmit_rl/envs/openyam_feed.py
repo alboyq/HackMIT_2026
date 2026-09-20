@@ -118,6 +118,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.prev_action = np.zeros(7)
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
         self.self_collisions = self.curl_steps = 0
+        self.knocked = self.was_pinched = False
+        self.phase = 0
         self.prev_dist = 0.0
         self.object_start = np.zeros(3)
         self.prev_tcp = np.zeros(3)
@@ -213,13 +215,39 @@ class OpenYAMFeedEnv(gym.Env):
             self.rest_z[obj] = self.base_rest_z[obj] * scale
             self.width[obj] = self.base_width[obj] * scale
 
-        angles = self.np_random.permutation(
-            np.linspace(*self.ecfg["object_angle_range_rad"], len(OBJECTS)))
-        for obj, angle in zip(OBJECTS, angles):
-            radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
+        # Rejection-sample so nothing spawns overlapping: two objects shoving each other apart
+        # on step 0 is not randomisation, it is noise the policy cannot act on.
+        placed: list[tuple[str, np.ndarray]] = []
+        lo_a, hi_a = self.ecfg["object_angle_range_rad"]
+        margin = float(self.ecfg["object_spacing_m"])
+        for obj in OBJECTS:
+            for _ in range(60):
+                radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
+                angle = self.np_random.uniform(lo_a, hi_a)
+                point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
+                clear = all(
+                    float(np.linalg.norm(point - other)) >
+                    0.5 * (self.width[obj] + self.width[name]) + margin
+                    for name, other in placed)
+                if clear:
+                    break
+            placed.append((obj, point))
             adr = self.obj_qadr[obj]
-            self.data.qpos[adr:adr + 3] = [radius * np.cos(angle), radius * np.sin(angle),
-                                           self.rest_z[obj]]
+            self.data.qpos[adr:adr + 3] = [point[0], point[1], self.rest_z[obj]]
+            self.data.qpos[adr + 3:adr + 7] = [1.0, 0.0, 0.0, 0.0]      # upright, no tilt
+            vadr = self.model.jnt_dofadr[self.model.joint(f"{obj}_free").id]
+            self.data.qvel[vadr:vadr + 6] = 0.0                          # and not spinning
+        mujoco.mj_forward(self.model, self.data)
+
+        # Let everything come to rest before the episode starts, with the arm held where it is.
+        hold = self.data.ctrl.copy()
+        for _ in range(int(self.ecfg["settle_steps"])):
+            self.data.ctrl[:] = hold
+            mujoco.mj_step(self.model, self.data)
+        for obj in OBJECTS:
+            vadr = self.model.jnt_dofadr[self.model.joint(f"{obj}_free").id]
+            self.data.qvel[vadr:vadr + 6] = 0.0
+        self.data.qvel[self.dadr] = 0.0
         mujoco.mj_forward(self.model, self.data)
 
         self.mouth = self.scene.site("mouth")
@@ -229,8 +257,11 @@ class OpenYAMFeedEnv(gym.Env):
         # Where the FOOD should end up: just short of the lips.
         self.food_point = self.mouth - approach * float(self.ecfg["food_gap_m"])
 
+        self.reach_offset = np.array([0.0, 0.0, float(self.ecfg["reach_offset_z"])])
         if self.stage == "present":
             self.target = self.food_point.copy()
+        elif self.stage == "reach":
+            self.target = self.scene.object_pos(self.name) + self.reach_offset
         else:
             self.target = self.scene.object_pos(self.name).copy()
 
@@ -238,6 +269,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.prev_action.fill(0)
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
         self.self_collisions = self.curl_steps = 0
+        self.knocked = self.was_pinched = False
+        self.phase = 0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self.object_start = self.scene.object_pos(self.name).copy()
@@ -270,6 +303,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.mouth = self.scene.site("mouth")
         if self.stage == "present":
             self.target = self.food_point
+        elif self.stage == "reach":
+            self.target = obj_pos + self.reach_offset
         else:
             self.target = obj_pos
 
@@ -320,34 +355,60 @@ class OpenYAMFeedEnv(gym.Env):
             self.hold_steps = self.hold_steps + 1 if ok else 0
             success = self.hold_steps >= round(float(self.ecfg["present_hold_s"]) / self.dt)
 
-        progress = self.prev_dist - distance
-        reward = 10.0 * progress - 0.1 * distance
-        reward += float(self.ecfg["grasp_bonus"]) * held
-        # Paid for closing, but only while lined up on the object -- otherwise the policy can
-        # farm it by clenching in mid-air. Closure is read off the COMMAND, so an object too
-        # wide to fully close on still counts as a committed squeeze.
+        # ---------------------------------------------------------------- phases
+        # Where the gripper has to be before closing means anything: over the object,
+        # at grasp height. Two separate tests, because a single 3D distance also passes
+        # when the gripper is beside the object rather than above it.
         grip_fraction = float((self.data.ctrl[self.grip_aid] - self.grip_range[0])
                               / max(1e-9, np.ptp(self.grip_range)))
-        if distance <= float(self.ecfg["align_m"]):
+        over_xy = float(np.linalg.norm(tcp[:2] - obj_pos[:2]))
+        height_error = abs(float(tcp[2] - obj_pos[2]))
+        in_position = (over_xy <= float(self.ecfg["align_xy_m"])
+                       and height_error <= float(self.ecfg["align_z_m"]))
+        if pinched:
+            phase = 2                                   # SECURE
+        elif in_position:
+            phase = 1                                   # CLOSE
+        else:
+            phase = 0                                   # APPROACH
+        self.phase = phase
+
+        progress = self.prev_dist - distance
+        reward = 10.0 * progress - 0.1 * distance
+
+        if phase == 0:
+            # Get there with the jaws open, WITHOUT touching. Closing early pays nothing and
+            # bumping the object costs, so the approach has to be clean.
+            reward += float(self.ecfg["open_bonus"]) * grip_fraction
+            if touching:
+                reward -= float(self.ecfg["approach_contact_penalty"])
+        elif phase == 1:
+            # In position: now, and only now, squeezing is what earns.
             reward += float(self.ecfg["close_bonus"]) * (1.0 - grip_fraction)
-        reward += float(self.ecfg["pinch_bonus"]) * pinched
-        reward += float(self.ecfg["lift_bonus"]) * max(0.0, float(obj_pos[2]) - self.rest_z[self.name])
-        if self.stage == "present":
-            reward += float(self.ecfg["carry_bonus"]) * carrying
-            if carrying and lead_margin > 0.0:
-                reward += float(self.ecfg["lead_bonus"])
-            # Slow down only once it is actually carrying food AND close to the person.
-            # Everywhere else -- crossing the table, reaching, lifting -- speed is free.
-            if carrying and float(np.linalg.norm(self.mouth - tcp)) < float(self.ecfg["slow_radius_m"]):
-                over = tcp_speed - float(self.ecfg["approach_speed_mps"])
-                if over > 0:
-                    reward -= float(self.ecfg["speed_penalty"]) * over
-            if held and not carrying and self.steps > 10:
-                reward -= float(self.ecfg["drop_penalty"])      # dropping the food is the failure mode
+            reward += float(self.ecfg["in_position_bonus"])
+        else:
+            reward += float(self.ecfg["pinch_bonus"])
+            reward += float(self.ecfg["lift_bonus"]) * max(
+                0.0, float(obj_pos[2]) - self.rest_z[self.name])
+            if self.stage == "present":
+                reward += float(self.ecfg["carry_bonus"]) * carrying
+                if carrying and lead_margin > 0.0:
+                    reward += float(self.ecfg["lead_bonus"])
+                # Slow only once carrying AND close to the person; the rest is free.
+                if carrying and float(np.linalg.norm(self.mouth - tcp)) < float(
+                        self.ecfg["slow_radius_m"]):
+                    excess = tcp_speed - float(self.ecfg["approach_speed_mps"])
+                    if excess > 0:
+                        reward -= float(self.ecfg["speed_penalty"]) * excess
+
+        # Losing the object after having held it is the failure mode that matters.
+        if self.stage == "present" and self.was_pinched and not pinched and self.steps > 10:
+            reward -= float(self.ecfg["drop_penalty"])
+        self.was_pinched = pinched
+
+        # ---------------------------------------------------------------- always-on costs
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()
         reward -= float(self.ecfg["jerk_penalty"]) * np.square(raw - self.prev_action).mean()
-        # Curling up: links touching, the wrist tucked back over the base, or joints
-        # pinned against their stops. Shaped, not terminal.
         tcp_radius = float(np.linalg.norm(tcp[:2]))
         curled = tcp_radius < float(self.ecfg["min_tcp_radius_m"])
         self.curl_steps += int(curled)
@@ -359,10 +420,11 @@ class OpenYAMFeedEnv(gym.Env):
         reward -= float(self.ecfg["joint_limit_penalty"]) * limit_strain
         reward -= float(self.ecfg["collision_penalty"]) * table_hits
         displaced = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2]))
-        # Batting it across the table, judged well clear of the success threshold so that
-        # ordinary approach contact is not punished.
-        if not carrying and displaced > float(self.ecfg["knock_free_m"]):
-            reward -= float(self.ecfg["knock_penalty"]) * min(1.0, displaced)
+        # Charged ONCE. Per-step, a single early nudge fined the policy for the rest of the
+        # episode, and never touching anything became the better strategy.
+        if not carrying and not self.knocked and displaced > float(self.ecfg["knock_free_m"]):
+            self.knocked = True
+            reward -= float(self.ecfg["knock_penalty"])
         reward -= float(self.ecfg["wall_penalty"]) * breached
         # Firm but not crushing: penalise force past the limit, and reward the band below it
         # only while actually holding, so the policy cannot earn it by hovering with open jaws.
@@ -376,7 +438,12 @@ class OpenYAMFeedEnv(gym.Env):
             reward += float(self.ecfg["success_bonus"])
 
         self.prev_dist, self.prev_action = distance, raw.copy()
-        truncated = self.steps >= int(self.ecfg["episode_steps"])
+        # An object off the table is unrecoverable; chasing it is what made the arm fly away.
+        lost = (displaced > float(self.ecfg["object_lost_m"])
+                or float(obj_pos[2]) < float(self.ecfg["object_lost_z"]))
+        if lost:
+            reward -= float(self.ecfg["lost_penalty"])
+        truncated = self.steps >= int(self.ecfg["episode_steps"]) or lost
         info = {"success": bool(success), "is_success": bool(success), "object": self.name,
                 "distance": distance, "max_joint_velocity": measured_velocity,
                 "peak_joint_velocity": self.peak_velocity, "velocity_cap": cap,
@@ -387,7 +454,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "object_displaced_m": displaced, "self_collisions": self.self_collisions,
                 "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius,
                 "grip_fraction": grip_fraction, "lead_margin_m": lead_margin,
-                "tcp_speed_mps": tcp_speed, "pad_gap_m": head_gap}
+                "tcp_speed_mps": tcp_speed, "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
+                "knocked": bool(self.knocked), "lost": bool(lost)}
         return self._observation(), float(reward), bool(success), bool(truncated), info
 
     def render(self):

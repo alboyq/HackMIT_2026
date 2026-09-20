@@ -28,13 +28,23 @@ env:
   # Scene randomisation: top-down band from MEASUREMENTS.md, plus per-episode re-sizing
   object_radius_range_m: [0.25, 0.45]
   object_scale_range: [0.75, 1.30]
+  object_spacing_m: 0.05       # clear gap between objects, so none spawn overlapping
+  settle_steps: 40             # let them come to rest before the episode starts
   pad_clearance_m: 0.008       # keep the widest axis this far inside the 83 mm pad opening
   object_angle_range_rad: [-0.55, 0.55]
   home_qpos: [-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637]
-  align_m: 0.06                # within this of the object, closing is rewarded
+  # PHASE gates: over the object and at grasp height before closing counts for anything
+  align_xy_m: 0.035
+  align_z_m: 0.05
+  approach_contact_penalty: 0.15   # phase 0 must not touch the object
+  open_bonus: 0.10             # phase 0: keep the jaws open while approaching
+  in_position_bonus: 0.30      # phase 1: being lined up is worth holding
   close_bonus: 0.20
   pinch_bonus: 0.30            # both pads on the object, per step
   knock_free_m: 0.10           # contact under this is approach, not batting
+  object_lost_m: 0.45          # past this it is gone: end the episode, do not chase
+  object_lost_z: -0.05
+  reach_offset_z: 0.035        # reach aims ABOVE the object: a pre-grasp pose
   grasp_hold_s: 0.3            # a grasp has to persist, not flicker for one frame
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.08
@@ -58,7 +68,8 @@ env:
   curl_penalty: 0.5
   joint_limit_penalty: 0.3
   collision_penalty: 0.2
-  knock_penalty: 1.0
+  knock_penalty: 1.0           # charged once
+  lost_penalty: 3.0
   wall_penalty: 1.0
   velocity_penalty: 0.002
   velocity_breach_penalty: 1.0
