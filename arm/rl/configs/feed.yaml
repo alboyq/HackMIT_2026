@@ -44,10 +44,11 @@ env:
   approach_contact_penalty: 0.15   # phase 0 must not touch the object
   open_enough: 0.70            # phase 0 jaws must stay at least this open
   early_close_penalty: 0.15
-  time_penalty: 0.02           # finishing beats loitering
-  in_position_bonus: 0.05      # small: getting there is the point, not staying
-  close_bonus: 0.20
-  pinch_bonus: 0.10            # both pads on the object, per step
+  time_penalty: 0.05           # finishing beats loitering, decisively
+  in_position_bonus: 0.0       # being in position is instrumental, not valuable
+  close_bonus: 0.03            # was 0.20: CLOSE out-paid SECURE, so it never pinched
+  pinch_bonus: 0.10            # > close_bonus, but small enough that holding it
+                               # for a whole episode cannot out-pay succeeding
   knock_free_m: 0.10           # contact under this is approach, not batting
   object_lost_m: 0.45          # past this it is gone: end the episode, do not chase
   object_lost_z: -0.05
@@ -81,7 +82,7 @@ env:
   velocity_penalty: 0.002
   velocity_breach_penalty: 1.0
   jerk_penalty: 0.002
-  success_bonus: 30.0          # must dominate any per-step term
+  success_bonus: 50.0          # must dominate per-step term x episode length
 
 training:
   n_envs: 20                   # 20 cores; measured +68% over the 12-env default
