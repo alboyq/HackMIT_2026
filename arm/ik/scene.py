@@ -35,6 +35,7 @@ Env knobs: YAM_OBJECTS (comma-separated subset), YAM_USER_X/Y/Z (seat position),
 YAM_CAM_RES, YAM_WRIST_FOVY, YAM_SCENE_FOVY.
 """
 import hashlib
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -90,6 +91,18 @@ PAD_ROWS_Z = (0.078, 0.070, 0.060, 0.050, 0.040, 0.030, 0.020)
 # the claws were levelled (8/19 dropped). 28 mm is a conservative average of the real taper.
 PLATE_HALF_W = float(os.environ.get("YAM_PLATE_HALF_W", "0.014"))
 PAD_FRICTION = os.environ.get("YAM_PAD_FRICTION", "1.5 0.02 0.001")
+# The real jaws are a V, not parallel plates. Caliper readings of the clear gap (2026-09-20):
+#     closed:  0 (tips touch)  /  21.0 mid  /  28.4 mm at the base
+#     open:   97.8 tip         / 112.2 mid  / 123.4 mm at the base
+# so each gripping face leans back 14.2 mm from tip to base and the jaws still travel in parallel (~96 mm).
+# What that changes: anything narrower than the local closed gap cannot be held THERE (a 20 mm grape is
+# only gripped in the outer ~70% of the face), and the squeeze pushes the object toward the base, not out.
+# YAM_JAW_V_MM = the closed gap at the base; 0 = the old parallel plates. A/B on the same 3 x 40 full pick-and-feed
+# episodes with the UNCHANGED grasp_v2 policy: parallel 88/120 fed, V 91/120 fed, 0 drops and 0 unsafe arrivals in both.
+# Still different from the real jaws: the sim opens to 78 mm at the tip, the real ones to 97.8 (sim is the stricter).
+JAW_V_MM = float(os.environ.get("YAM_JAW_V_MM", "28.4"))
+_FACE_TIP_Z, _FACE_BASE_Z = 0.086, 0.006
+JAW_SLOPE = 0.5e-3 * JAW_V_MM / (_FACE_TIP_Z - _FACE_BASE_Z)      # metres the face recedes per metre toward the base
 GRIP_KV = float(os.environ.get("YAM_GRIP_KV", "30"))
 
 # the user, seated across the table from the arm (metres, robot base frame)
@@ -221,13 +234,20 @@ def _centre_fingers(src: str) -> str:
         if finger.count(plate) != 1:
             raise RuntimeError(f"{ARM_XML}: gripping plate not found on {down} -- model changed?")
         finger = finger.replace(plate, f'type="box" size="{PLATE_HALF_W:g} 0.002 0.04"')
+        if JAW_SLOPE:
+            flat = 'pos="0 -0.0024 0.046" quat="1 0 0 0"'
+            if finger.count(flat) != 1:
+                raise RuntimeError(f"{ARM_XML}: gripping plate pose not found on {down} -- model changed?")
+            phi = -math.atan(JAW_SLOPE)
+            finger = finger.replace(flat, f'pos="0 {-0.0024 - JAW_SLOPE * (_FACE_TIP_Z - 0.046):g} 0.046" '
+                                          f'quat="{math.cos(phi / 2):g} {math.sin(phi / 2):g} 0 0"')
         first = finger.index("<geom")
         finger = finger[:first] + wedge + finger[first:]
         finger, n = re.subn(r'\s*<geom class="sphere_collision"[^>]*/>', "", finger)
         if n != 6:
             raise RuntimeError(f"{ARM_XML}: expected 6 stock pads on {down}, found {n}")
         finger = finger.rstrip() + "".join(
-            f'\n                        <geom class="sphere_collision" friction="{PAD_FRICTION}" pos="{x:g} -0.0004 {z:g}"/>'
+            f'\n                        <geom class="sphere_collision" friction="{PAD_FRICTION}" pos="{x:g} {-0.0004 - JAW_SLOPE * (_FACE_TIP_Z - z):g} {z:g}"/>'
             for z in PAD_ROWS_Z for x in (0.009, 0.003, -0.003, -0.009)) + "\n                      "
         src = src[:r0] + linkage + finger + src[d1:]
     for mesh in ("model2__14", "model2__15", "model2__16", "model2__17"):
