@@ -316,6 +316,74 @@ class RealArm(ArmInterface):
             raise
 
 
+HOME_Q = np.array([-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637])      # the policies' start pose (arm/ik/scene.py HOME_Q), MODEL numbers
+
+
+def check_path_to_start(q_from_model):
+    """Offline: the straight joint-space move from where the arm is to the policies' start pose, checked in the sim for
+    self-collision and for the jaws dipping toward the table (arm/sim_guard.py). Returns (ok, text)."""
+    sys.path.insert(0, str(REPO))
+    from arm.sim_guard import SimGuard
+    xml = next(p for p in (REPO / "third_party/mujoco_menagerie/i2rt_yam/yam.xml", Path.home() / "yam_simfirst/mujoco_menagerie/i2rt_yam/yam.xml") if p.exists())
+    g = SimGuard(str(xml), reference_q=np.asarray(q_from_model, float))
+    v = g.check_path(q_from_model, HOME_Q, steps=60)
+    low = min(g.lowest_gripper_z(np.asarray(q_from_model) + (HOME_Q - np.asarray(q_from_model)) * u) for u in np.linspace(0, 1, 60))
+    return v.ok, f"{'clear' if v.ok else 'BLOCKED: ' + v.reason}; lowest the jaws get on the way: {100 * low:.1f} cm above the base plane"
+
+
+def goto_start(hold_s: float, peak_rad_s: float, dry: bool) -> int:
+    """SLOW cosine-eased move from rest to the policies' start pose, hold, ease back, release at rest. Every setpoint
+    goes through send(): contact stop, lag guard -> hold, rate limit all active. --dry: reads only, prints the plan."""
+    import signal
+    if dry:
+        sys.path.insert(0, str(Path.home() / "openyam"))
+        from openyam.arm import ArmConfig, OpenYAMArm
+        from openyam.gsusb import CanBus
+        _, offset, stops = load_joint_map()
+        bus = CanBus()
+        try:
+            drv = OpenYAMArm(ArmConfig(), bus=bus, include_gripper=False)
+            raw = np.array([m.read_state().position for m in drv.motors])      # motors are DISABLED here: a read moves nothing
+        finally:
+            bus.close()
+        laps = np.array(RealArm.infer_laps(raw, stops), float)
+        q0 = raw + TAU * laps - offset
+        ok, text = check_path_to_start(q0)
+        travel = HOME_Q - q0
+        print(f"now (model): {np.round(q0, 3)}")
+        print(f"start pose : {np.round(HOME_Q, 3)}")
+        print(f"travel     : {np.round(travel, 3)}  (largest {np.abs(travel).max():.2f} rad -> {(np.pi / 2) * np.abs(travel).max() / peak_rad_s:.0f} s at peak {peak_rad_s} rad/s)")
+        print(f"path       : {text}")
+        print("dry run: nothing enabled, nothing moved")
+        return 0 if ok else 1
+    arm = RealArm.connect(gripper=False)
+    q0 = arm.to_model(arm._sp)
+    ok, text = check_path_to_start(q0)
+    print("[RealArm] path:", text, flush=True)
+    stop = {"n": 0}
+    signal.signal(signal.SIGINT, lambda *a: stop.__setitem__("n", stop["n"] + 1))
+    if ok:
+        T = (np.pi / 2) * float(np.abs(HOME_Q - q0).max()) / peak_rad_s
+        t0 = last = time.time(); arm_t = 1.0                                   # 1 s settle first: feed-forward ramps in
+        while not stop["n"] and arm.mode == "run":
+            el = time.time() - t0 - arm_t
+            if el > T + hold_s:
+                break
+            a = 0.0 if el < 0 else (1.0 if el >= T else 0.5 * (1 - np.cos(np.pi * el / T)))
+            arm.send(q0 + (HOME_Q - q0) * a)
+            if time.time() - last >= 1.0:
+                last = time.time(); L = arm.sender.last
+                print(f"  {100 * a:3.0f}%  lag " + " ".join(f"{x:+.3f}" for x in L["lag"]) + " | torque " + " ".join(f"{x:+5.1f}" for x in L["torque"])
+                      + " | ff " + " ".join(f"{x:+5.1f}" for x in L["tff"]), flush=True)
+        print(f"[RealArm] mode {arm.mode}; {arm.fault}" if arm.mode != "run" else "[RealArm] held at the start pose; going back", flush=True)
+    print("[RealArm]", arm.shutdown(speed=min(0.2, peak_rad_s)), flush=True)
+    print("[RealArm] peak torque beyond feed-forward, N.m:", np.round(arm.peak_excess, 2))
+    n0 = stop["n"]
+    while arm.mode == "hold" and stop["n"] == n0:
+        arm.send(None); time.sleep(1.0 / arm.rate_hz)
+    return 0 if arm.mode == "released" else 1
+
+
 def hold_test(seconds: float, grip: bool) -> int:
     """FIRST powered test of this backend: enable, hold exactly where the arm already is (zero motion asked for),
     report the torques, release. --grip also closes the jaws halfway and reopens them. Ctrl-C ends it early. If it
@@ -483,6 +551,9 @@ def _raises(fn):
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--goto-start" in sys.argv:                # python real_arm.py --goto-start [--dry] [--hold 5] [--speed 0.12]   (a PERSON runs this)
+        arg = lambda k, d: float(sys.argv[sys.argv.index(k) + 1]) if k in sys.argv else d  # noqa: E731
+        sys.exit(goto_start(arg("--hold", 5.0), min(0.25, arg("--speed", 0.12)), "--dry" in sys.argv))
     if "--hold-test" in sys.argv:                 # python real_arm.py --hold-test 10 [--grip]   (a PERSON runs this, at the arm)
         sys.exit(hold_test(float(sys.argv[sys.argv.index("--hold-test") + 1]), "--grip" in sys.argv))
     sys.exit(print(__doc__) or 0)
