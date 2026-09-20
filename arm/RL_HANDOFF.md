@@ -98,7 +98,7 @@ than assuming the box is down.
 Every command below assumes:
 
 ```bash
-cd ~/HackMIT_2026-arm-ik-rl
+cd "$(git rev-parse --show-toplevel)"   # anywhere inside the clone
 export YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie PYTHONPATH=.:arm/rl OMP_NUM_THREADS=1
 ```
 

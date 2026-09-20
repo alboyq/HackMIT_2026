@@ -3,7 +3,7 @@
 This directory is isolated from teammate-owned code. `ik/` is the default, no-learning pick/lift/deliver path; `rl/` is a low-dimensional PPO curriculum using exactly the same Menagerie YAM model and a fixed 23-value observation / 7-value action interface. Nothing here commands hardware by default.
 
 ```bash
-cd ~/HackMIT_2026-arm-ik-rl
+cd "$(git rev-parse --show-toplevel)"   # anywhere inside the clone
 export YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie
 source .venv-arm/bin/activate
 pytest arm/ik/tests -q

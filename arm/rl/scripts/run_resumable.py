@@ -109,7 +109,8 @@ def main() -> None:
     n_steps = args.n_steps or int(tcfg["n_steps"])
     total = args.timesteps or int(tcfg["total_timesteps"])
     args.run_dir.mkdir(parents=True, exist_ok=True)
-    torch.set_num_threads(1)
+    # The learner runs while every env worker is idle, so it may use the cores they are not.
+    torch.set_num_threads(int(os.environ.get("YAM_LEARNER_THREADS", "8")))
 
     env_cls = ENVS[args.env]
     factories = [(lambda: Monitor(env_cls(cfg))) for _ in range(n_envs)]
@@ -131,7 +132,7 @@ def main() -> None:
     if model_path:
         env = VecNormalize.load(str(stats_path), raw)
         env.training, env.norm_reward = True, True
-        model = PPO.load(model_path, env=env, device="cpu",
+        model = PPO.load(model_path, env=env, device="cpu", batch_size=int(tcfg["batch_size"]),
                          tensorboard_log=str(args.run_dir / "tensorboard"))
         if transferred and transferred_from == "reach" and args.stage != "reach":
             reset_gripper_head(model)

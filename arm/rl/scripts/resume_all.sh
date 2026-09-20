@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Resume positioning from its newest checkpoint, then the chain, with self-restarting viewers.
 set -u
-cd ~/HackMIT_2026-arm-ik-rl || exit 1
+# Resolve the repo root from this script's own location, so the clone can live anywhere.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)" || exit 1
 export YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie PYTHONPATH=.:arm/rl OMP_NUM_THREADS=1
 (
   if [ ! -f runs/feed-reach/ppo_reach_final.zip ]; then

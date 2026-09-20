@@ -411,6 +411,9 @@ if __name__ == "__main__":
     print("mouth:", np.round(s.site("mouth"), 3), " hand:", np.round(s.site("hand"), 3))
     for cam in ("scene_cam", "wrist_cam"):
         import imageio.v3 as iio
-        out = f"/private/tmp/claude-501/-Users-adipu-so101Sim/0bbaecf6-c03b-4137-b839-fa8a809e7763/scratchpad/yam_{cam}.png"
+        import os, tempfile
+        out_dir = os.environ.get("YAM_OUT_DIR") or tempfile.gettempdir()
+        os.makedirs(out_dir, exist_ok=True)
+        out = os.path.join(out_dir, f"yam_{cam}.png")
         iio.imwrite(out, s.render(cam, 384))
         print("wrote", out)

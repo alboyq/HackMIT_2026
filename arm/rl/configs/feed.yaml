@@ -22,7 +22,7 @@ env:
     max_steps: 150             # per prior stage; reach takes 21-80
     retries: 4                 # re-deal the scene if a prior stage fails, then give up loudly
     runs: {reach: runs/feed-reach, grasp: runs/feed-grasp}   # lift is folded into grasp
-    reuse_prob: 0.75           # restore a recent hand-off state instead of replaying reach;
+    reuse_prob: 0.90           # restore a recent hand-off state instead of replaying reach;
     bank: 24                   # one env resetting stalls all 20 (measured load 3.7 of 20)
 
   # Control / safety envelope
@@ -118,11 +118,11 @@ env:
   success_bonus: 50.0          # must dominate per-step term x episode length
 
 training:
-  n_envs: 20                   # 20 cores; measured +68% over the 12-env default
+  n_envs: 48                   # lockstep envs were idle (load 3 of 20): stalls come from resets, not cores
   total_timesteps: 3000000
   learning_rate: 0.0003
   n_steps: 512                 # fewer, larger syncs -> less IPC overhead
-  batch_size: 512
+  batch_size: 2048             # 48 x 512 samples per update
   gamma: 0.99
   gae_lambda: 0.95
   ent_coef: 0.004              # more exploration than 0.001; reach stalled at 5% before

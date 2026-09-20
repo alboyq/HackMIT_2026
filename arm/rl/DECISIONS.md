@@ -1,7 +1,7 @@
 # Decisions
 
 - 2026-09-19: Use CPU PPO. The policy is a small MLP and MuJoCo environment stepping is the bottleneck; this avoids competing with teammates for unified GPU memory.
-- 2026-09-19: Reuse I2RT's `yam_station_linear_4310_d405.xml`, already cloned and smoke-tested at `~/HackMIT_2026/third_party/i2rt`, instead of spending the Phase A timebox converting Anvil's URDF.
+- 2026-09-19: Reuse I2RT's `yam_station_linear_4310_d405.xml`, already cloned and smoke-tested under `third_party/i2rt` (point `YAM_MENAGERIE`/`I2RT_ROOT` at your own clone; it is not vendored here), instead of spending the Phase A timebox converting Anvil's URDF.
 - 2026-09-19: Use six arm joint delta actions plus one gripper action from the first stage so observation/action shapes remain stable across reach, grasp, and lift.
 - 2026-09-19: Use 50 Hz control with five 4 ms MuJoCo substeps. This is conservative and suitable for later real-arm rate limiting.
 - 2026-09-19: Apply PD torque in the environment because the vendor station MJCF is kinematic and has no control actuators.
