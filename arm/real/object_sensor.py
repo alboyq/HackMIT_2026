@@ -27,6 +27,27 @@ PEOPLE = ["human face", "person"]        # reported separately: they CONFIRM the
 DISTRACTORS = ["hand", "robot gripper", "table", "plate", "laptop", "phone", "cable"]
 
 
+RED_FRUIT = {"grape", "strawberry", "cherry", "raspberry", "tomato"}
+
+
+def red_fruit_box(frame_bgr, target):
+    """Saturated-red blobs. The camera renders a red grape and a strawberry the same dark red (hue and BGR within
+    noise), so they are told apart by SIZE: with two in view the strawberry is the larger; with one, it is taken to be
+    the food that was asked for. Returns (x1, y1, x2, y2) or None."""
+    import cv2
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    red = cv2.inRange(hsv, (0, 90, 40), (12, 255, 255)) | cv2.inRange(hsv, (160, 90, 40), (180, 255, 255))
+    red = cv2.morphologyEx(red, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    n, _, st, _ = cv2.connectedComponentsWithStats(red)
+    H, W = red.shape
+    blobs = [st[i] for i in range(1, n) if 250 < st[i, 4] < 0.05 * H * W and st[i, 2] < 3 * st[i, 3] and st[i, 3] < 3 * st[i, 2]]
+    if not blobs:
+        return None
+    blobs.sort(key=lambda b: -b[4])
+    b = blobs[0] if (target != "grape" or len(blobs) == 1) else blobs[1]
+    return float(b[0]), float(b[1]), float(b[0] + b[2]), float(b[1] + b[3])
+
+
 @dataclass
 class ObjectReading:
     seen: bool
@@ -59,11 +80,18 @@ class ObjectSensor:
                 best = b
             if self.names[int(b.cls[0])] in PEOPLE:
                 people.append(tuple(float(v) for v in b.xyxy[0]) + (float(b.conf[0]),))
-        if best is None:
+        box, conf = (None, 0.0) if best is None else (tuple(float(v) for v in best.xyxy[0]), float(best.conf[0]))
+        if self.target in RED_FRUIT and conf < 0.25:
+            # Measured on the real wrist camera: a grape / strawberry ~40 px across scores 0.01-0.07 with YOLO-World, i.e.
+            # nothing. On a plain table they are the only saturated red things in view, so colour finds them every frame.
+            alt = red_fruit_box(frame_bgr, self.target)
+            if alt is not None:
+                box, conf = alt, max(conf, 0.5)
+        if box is None:
             return ObjectReading(False, people=people)
-        x1, y1, x2, y2 = (float(v) for v in best.xyxy[0])
+        x1, y1, x2, y2 = box
         cy = 0.5 * (y1 + y2)
-        r = ObjectReading(True, self.target, float(best.conf[0]), (x1, y1, x2, y2), people=people)
+        r = ObjectReading(True, self.target, conf, (x1, y1, x2, y2), people=people)
         r.width_deg = self.cam.angle_between((x1, cy), (x2, cy))
         aspect = (y2 - y1) / max(1.0, x2 - x1)
         r.slot = SLOT.get(self.target, "mug" if aspect > 1.35 else "apple")
