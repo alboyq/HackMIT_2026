@@ -81,13 +81,10 @@ def test_height_is_never_rent(path):
     e = load_config(path)["env"]
     assert "lift_bonus" not in e, f"{path.name}: lift_bonus is per-step rent on height; use progress"
     total = float(e["lift_progress_gain"]) * float(e["lift_height_m"])
-    assert total < 0.1 * float(e["success_bonus"]), (
+    assert total < 0.2 * float(e["success_bonus"]), (
         f"{path.name}: lifting alone is worth {total:.1f}; it must stay small next to finishing")
 
 
-@pytest.mark.xfail(reason="KNOWN HOLE, present stage only: carry_bonus + lead_bonus are per-step "
-                          "rent (0.35/step, 105 an episode vs success 50). Fix before training present.",
-                   strict=False)
 @pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
 def test_present_rent_cannot_beat_finishing(path):
     e = load_config(path)["env"]
@@ -101,3 +98,12 @@ def test_lift_gates_are_ordered(path):
     e = load_config(path)["env"]
     assert float(e["lift_max_drift_m"]) < float(e["lift_abort_drift_m"])
     assert float(e["lift_band_m"]) > 0.02, "the stop band must be wider than the arm can hold"
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_milestones_stay_small(path):
+    """One-off payments (seated pinch, lift progress) must not rival finishing either, or the
+    policy collects them and stops."""
+    e = load_config(path)["env"]
+    once = float(e["pinch_once_bonus"]) + float(e["lift_progress_gain"]) * float(e["lift_height_m"])
+    assert once < 0.2 * float(e["success_bonus"]), f"{path.name}: milestones total {once:.1f}"

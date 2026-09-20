@@ -70,6 +70,9 @@ class OpenYAMFeedEnv(gym.Env):
         self.prev_lift = 0.0
         self.stage_object_start = np.zeros(3)
         self.tip_ahead = None        # fingertip distance past the TCP, measured off the model
+        self.was_lifted = False
+        self.pinch_paid = False
+        self._bank = []              # recent hand-off states, see reset()
 
         self.scene = YamScene(objects=list(OBJECTS))
         self.model, self.data = self.scene.model, self.scene.data
@@ -351,6 +354,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.phase = 0
         self.settle_calm = 0.0
         self.prev_tcp = self._tcp().copy()
+        self.was_lifted = False
+        self.pinch_paid = False
         # Each stage is judged on what IT did to the object, not on what it inherited.
         self.stage_object_start = obj_pos.copy()
         self.prev_lift = float(np.clip(obj_pos[2] - self.rest_z[self.name], 0.0,
@@ -366,6 +371,8 @@ class OpenYAMFeedEnv(gym.Env):
         torch.set_num_threads(1)
         priors = []
         for stage in STAGES[:STAGES.index(self.final_stage)]:
+            if stage not in self.handoff["runs"]:
+                continue                     # e.g. lift, now folded into grasp
             run = Path(self.handoff["runs"][stage])
             weights, stats = run / f"ppo_{stage}_final.zip", run / "vecnormalize.pkl"
             if not weights.exists() or not stats.exists():
@@ -398,17 +405,63 @@ class OpenYAMFeedEnv(gym.Env):
                 return False
         return True
 
+    def _snapshot(self) -> dict:
+        gids = [self.obj_gid[n] for n in OBJECTS]
+        bids = [self.obj_bid[n] for n in OBJECTS]
+        return dict(qpos=self.data.qpos.copy(), qvel=self.data.qvel.copy(), ctrl=self.data.ctrl.copy(),
+                    warm=self.data.qacc_warmstart.copy(), time=float(self.data.time),
+                    size=self.model.geom_size[gids].copy(), mass=self.model.body_mass[bids].copy(),
+                    rest_z=dict(self.rest_z), width=dict(self.width), name=self.name,
+                    onehot=self.onehot.copy(), filtered=self.filtered.copy(),
+                    prev_action=self.prev_action.copy(), object_start=self.object_start.copy(),
+                    mouth=self.mouth.copy(), stage_point=self.stage_point.copy(),
+                    food_point=self.food_point.copy(), reach_offset=self.reach_offset.copy(),
+                    steps=self.handoff_steps)
+
+    def _restore(self, snap: dict) -> None:
+        gids = [self.obj_gid[n] for n in OBJECTS]
+        bids = [self.obj_bid[n] for n in OBJECTS]
+        self.model.geom_size[gids] = snap["size"]
+        self.model.body_mass[bids] = snap["mass"]
+        self.data.qpos[:], self.data.qvel[:], self.data.ctrl[:] = snap["qpos"], snap["qvel"], snap["ctrl"]
+        self.data.qacc_warmstart[:] = snap["warm"]
+        self.data.time = snap["time"]
+        mujoco.mj_forward(self.model, self.data)
+        self.rest_z, self.width = dict(snap["rest_z"]), dict(snap["width"])
+        self.name, self.onehot = snap["name"], snap["onehot"].copy()
+        self.filtered, self.prev_action = snap["filtered"].copy(), snap["prev_action"].copy()
+        self.object_start = snap["object_start"].copy()
+        self.mouth, self.stage_point = snap["mouth"].copy(), snap["stage_point"].copy()
+        self.food_point, self.reach_offset = snap["food_point"].copy(), snap["reach_offset"].copy()
+        self.handoff_steps = snap["steps"]
+        self.collisions = self.wall_hits = self.crush_steps = 0
+        self.self_collisions = self.curl_steps = 0
+        self.knocked = self.was_pinched = False
+        self.peak_velocity = self.peak_grip_force = 0.0
+        self._sample_perception_bias()
+
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         use_priors = bool(self.handoff.get("enabled", False)) and self.final_stage != STAGES[0]
         if use_priors and self._priors is None:
             self._priors = self._load_priors()
         self.handoff_ok = True
-        for _ in range(1 + int(self.handoff.get("retries", 4)) if use_priors else 1):
-            self._reset_scene()
-            self.handoff_ok = self._run_priors() if use_priors else True
-            if self.handoff_ok:
-                break
+        # Replaying the frozen stages costs ~90 ms, and the vectorised envs step in lockstep, so
+        # one env resetting stalls the other 19: measured load 3.7 on 20 cores, 1,200 steps/s.
+        # Most resets therefore restore a recent hand-off state (with fresh perception error)
+        # instead of regenerating one.
+        reuse = float(os.environ.get("YAM_HANDOFF_REUSE", self.handoff.get("reuse_prob", 0.0)))
+        if use_priors and self._bank and self.np_random.random() < reuse:
+            self._restore(self._bank[int(self.np_random.integers(len(self._bank)))])
+        else:
+            for _ in range(1 + int(self.handoff.get("retries", 4)) if use_priors else 1):
+                self._reset_scene()
+                self.handoff_ok = self._run_priors() if use_priors else True
+                if self.handoff_ok:
+                    break
+            if use_priors and self.handoff_ok:
+                self._bank.append(self._snapshot())
+                del self._bank[:-int(self.handoff.get("bank", 24))]
         self._begin_stage(self.final_stage)
         return self._observation(), {"success": False, "object": self.name,
                                      "handoff_ok": self.handoff_ok,
@@ -492,6 +545,14 @@ class OpenYAMFeedEnv(gym.Env):
         # fraction of what the table allows for an object this tall.
         insertion = float((obj_pos - (tcp + tool_axis * self.tip_ahead)) @ (-tool_axis))
         seat_frac = float(np.clip(insertion / max(1e-3, self.rest_z[self.name] - 0.005), 0.0, 1.0))
+        # Where the object sits between the claws, in the claw's own axes.
+        to_obj = obj_pos - tcp
+        e_jaw = float(to_obj @ jaw_axis)                       # toward one claw or the other
+        e_pad = float(to_obj @ np.cross(tool_axis, jaw_axis))  # across the width of the claws
+        lateral = float(np.hypot(e_jaw, e_pad))
+        side_clearance = 0.5 * (float(self.tool.max_width) - float(self.width[self.name]))
+        centred = (abs(e_jaw) <= max(0.003, side_clearance - 0.002)
+                   and abs(e_pad) <= float(self.ecfg["centre_across_m"]))
         oriented = (tilt_deg <= float(self.ecfg["max_tilt_deg"])
                     and off_square_deg <= float(self.ecfg["max_off_square_deg"]))
 
@@ -517,9 +578,15 @@ class OpenYAMFeedEnv(gym.Env):
             self.settle_calm = (1.0 - min(1.0, joint_speed / float(self.ecfg["reach_settle_qvel"]))
                                 if distance <= float(self.ecfg["success_distance_m"]) else 0.0)
         elif self.stage == "grasp":
+            # A grab is a PICK-UP: seated between the claws, lifted clear of the table, straight
+            # up, and held still. A squeeze that never leaves the table is not a grasp, and the
+            # next stage needs a stationary start.
             settled = stage_drift <= float(self.ecfg["grasp_max_displacement_m"])
             seated = seat_frac >= float(self.ecfg["min_seat_frac"])
-            self.hold_steps = self.hold_steps + 1 if (pinched and closed and settled and seated) else 0
+            at_height = carrying and height <= lift_h + float(self.ecfg["lift_band_m"])
+            steady = (joint_speed_now <= float(self.ecfg["reach_settle_qvel"])
+                      and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
+            self.hold_steps = self.hold_steps + 1 if (at_height and seated and settled and steady) else 0
             success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
         elif self.stage == "lift":
             # Straight up, then STOP. Present needs a stationary, known starting pose, and an
@@ -546,8 +613,12 @@ class OpenYAMFeedEnv(gym.Env):
                               / max(1e-9, np.ptp(self.grip_range)))
         over_xy = float(np.linalg.norm(tcp[:2] - obj_pos[:2]))
         height_error = abs(float(tcp[2] - obj_pos[2]))
-        in_position = (over_xy <= float(self.ecfg["align_xy_m"])
-                       and height_error <= float(self.ecfg["align_z_m"]))
+        # Closing is only worth anything once the claw is PLACED: object centred within the real
+        # side clearance, seated deep, claw vertical and squared. The old test (35 mm sideways,
+        # 50 mm vertically) was already true hovering at the object's top -- in 9 of 15 failures
+        # it was squeezing at seating depth 0.11, with the finger bodies landing on the object.
+        in_position = (centred and oriented
+                       and seat_frac >= float(self.ecfg["min_seat_frac"]))
         if pinched:
             phase = 2                                   # SECURE
         elif in_position:
@@ -565,7 +636,10 @@ class OpenYAMFeedEnv(gym.Env):
             reward -= float(self.ecfg["orient_penalty"]) * near * (
                 min(1.0, tilt_deg / 30.0) + square_err)
             if self.stage == "grasp":
-                reward -= float(self.ecfg["seat_penalty"]) * near * (1.0 - seat_frac)
+                # Centre FIRST, then descend. Off-centre, the cost is flat in depth, so there is
+                # nothing to gain by going down; centring lowers it, and only then does depth.
+                c = min(1.0, lateral / float(self.ecfg["centre_scale_m"]))
+                reward -= float(self.ecfg["seat_penalty"]) * near * (c + (1.0 - c) * (1.0 - seat_frac))
 
         if phase == 0:
             # Approach clean: a COST for closing early or touching, never a per-step reward for
@@ -583,19 +657,31 @@ class OpenYAMFeedEnv(gym.Env):
                 # Nipped by the tips. It cannot succeed like this, so it must not earn like
                 # this either: census found 243 steps parked in a shallow pinch on the apple.
                 reward -= float(self.ecfg["seat_penalty"]) * (1.0 - seat_frac)
-            else:
+            elif self.stage != "grasp":
                 reward += float(self.ecfg["pinch_bonus"])
+            else:
+                # In the grab, a seated pinch pays ONCE, as a milestone, and per step only while
+                # HOLDING AT HEIGHT. Paid per step on the table it was rent: +0.10/step net, and
+                # with discounting ~70 steps of it beat the eventual fail charge. Measured: after
+                # clean pinches (1-6 mm displacement) the arm never rose, best lift 6 mm, and
+                # 29/30 episodes ended dragged to exactly the 40 mm gate.
+                if not self.pinch_paid:
+                    reward += float(self.ecfg["pinch_once_bonus"])
+                    self.pinch_paid = True
+                if carrying:
+                    reward += float(self.ecfg["pinch_bonus"])
             # Height pays as PROGRESS, capped at the lift height, so it telescopes to a fixed
             # total and cannot be farmed. The old `lift_bonus * height` was rent with no ceiling:
             # 0.9/step at 30 cm, 270 an episode against a success bonus of 50, so once pinched the
             # best income was to swing the object as high as the arm goes.
-            if self.stage != "grasp":
-                capped = float(np.clip(height, 0.0, lift_h))
+            capped = float(np.clip(height, 0.0, lift_h))
+            if self.stage != "grasp" or seat_frac >= float(self.ecfg["min_seat_frac"]):
                 reward += float(self.ecfg["lift_progress_gain"]) * (capped - self.prev_lift)
                 self.prev_lift = capped
-            if self.stage == "lift":
+            if self.stage in ("grasp", "lift"):
                 # All three are COSTS. Sideways travel, going past the band, and moving once up.
                 # The speed cost fades in with height so there is no cliff to stall beneath.
+                self.was_lifted |= bool(carrying)
                 reward -= float(self.ecfg["drift_penalty"]) * stage_drift
                 reward -= float(self.ecfg["overshoot_penalty"]) * max(
                     0.0, height - lift_h - float(self.ecfg["lift_band_m"]))
@@ -645,7 +731,8 @@ class OpenYAMFeedEnv(gym.Env):
         # only while actually holding, so the policy cannot earn it by hovering with open jaws.
         if crushing:
             reward -= float(self.ecfg["crush_penalty"]) * (grip_force - crush_limit) / crush_limit
-        elif held and grip_force >= float(self.ecfg["min_grip_force_n"]):
+        elif (held and grip_force >= float(self.ecfg["min_grip_force_n"])
+              and (self.stage != "grasp" or carrying)):          # same rent, same fix
             reward += float(self.ecfg["grip_band_bonus"])
         if measured_velocity > cap * 1.5:
             reward -= float(self.ecfg["velocity_breach_penalty"])
@@ -663,6 +750,7 @@ class OpenYAMFeedEnv(gym.Env):
         failed = lost
         if self.stage == "grasp":
             failed |= stage_drift > float(self.ecfg["grasp_max_displacement_m"])
+            failed |= self.was_lifted and not pinched          # picked it up and DROPPED it
         elif self.stage == "lift":
             failed |= stage_drift > float(self.ecfg["lift_abort_drift_m"])
         failed = failed and not success
@@ -684,7 +772,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "tcp_speed_mps": tcp_speed, "joint_speed": float(np.abs(self.data.qvel[self.dadr]).max()), "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
                 "knocked": bool(self.knocked), "lost": bool(lost), "failed": bool(failed),
                 "lift_m": height, "stage_drift_m": stage_drift, "tilt_deg": tilt_deg,
-                "off_square_deg": float(off_square_deg), "seat_frac": seat_frac}
+                "off_square_deg": float(off_square_deg), "seat_frac": seat_frac, "e_jaw_m": e_jaw, "e_pad_m": e_pad,
+                "centred": bool(centred), "oriented": bool(oriented)}
         return self._observation(), float(reward), bool(success or failed), bool(truncated), info
 
     def render(self):

@@ -13,6 +13,9 @@ export YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie PYTHONPATH=.:arm/rl OMP_N
 ) > /dev/null 2>&1 < /dev/null &
 disown
 
+( while true; do sync; sleep 30; done ) > /dev/null 2>&1 < /dev/null &
+disown
+
 current_stage() {
   local s; s=$(grep -o "starting [a-z]*" runs/chain.log 2>/dev/null | tail -1 | cut -d" " -f2)
   if [ -z "$s" ] || ! ls runs/feed-$s/checkpoints/*.zip > /dev/null 2>&1; then s=reach; fi

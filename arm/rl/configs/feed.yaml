@@ -21,7 +21,9 @@ env:
     enabled: true
     max_steps: 150             # per prior stage; reach takes 21-80
     retries: 4                 # re-deal the scene if a prior stage fails, then give up loudly
-    runs: {reach: runs/feed-reach, grasp: runs/feed-grasp, lift: runs/feed-lift}
+    runs: {reach: runs/feed-reach, grasp: runs/feed-grasp}   # lift is folded into grasp
+    reuse_prob: 0.75           # restore a recent hand-off state instead of replaying reach;
+    bank: 24                   # one env resetting stalls all 20 (measured load 3.7 of 20)
 
   # Control / safety envelope
   action_delta_rad: 0.02
@@ -45,14 +47,15 @@ env:
   object_scale_range: [0.75, 1.30]
   object_spacing_m: 0.12       # real setup will not crowd them; do not train on packed scenes
   settle_steps: 40             # let them come to rest before the episode starts
-  pad_clearance_m: 0.018       # 4 mm per side vs 17.5 mm perception error was unwinnable
+  pad_clearance_m: 0.026       # 13 mm a side fully open; 9 mm was under the centring error
   object_angle_range_rad: [-0.95, 0.95]   # wide enough that the spacing above fits
   home_qpos: [-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637]
   # PHASE gates: over the object and at grasp height before closing counts for anything
   align_xy_m: 0.035
   align_z_m: 0.05
   approach_contact_penalty: 0.15   # phase 0 must not touch the object
-  open_enough: 0.70            # phase 0 jaws must stay at least this open
+  open_enough: 0.90            # descend FULLY open. At 0.70 it came down at 65-71 mm of 82.8,
+                               # leaving 4.5 mm a side in failures vs a 6-8 mm centring error
   early_close_penalty: 0.15
   time_penalty: 0.05           # finishing beats loitering, decisively
   in_position_bonus: 0.0       # being in position is instrumental, not valuable
@@ -69,11 +72,13 @@ env:
   max_off_square_deg: 15.0     # and this square to a box (round objects are exempt)
   orient_radius_m: 0.15        # orientation only costs this close to the target
   orient_penalty: 0.10
+  centre_across_m: 0.010       # object centre within this of the claws' mid-width
+  centre_scale_m: 0.020        # centring cost saturates at this lateral error
   min_seat_frac: 0.6           # a grasp counts only with the object this deep between the claws
   seat_penalty: 0.10           # pulls the gripper base toward the object before closing
-  grasp_hold_s: 0.3            # a grasp has to persist, not flicker for one frame
+  grasp_hold_s: 0.7            # a grab is a pick-up HELD still at height, or it is a fail
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
-  lift_height_m: 0.08
+  lift_height_m: 0.10          # clearly off the table, not grazing it
   lift_hold_s: 0.5
   lift_band_m: 0.06            # stop between lift_height_m and this much above it
   lift_max_drift_m: 0.03       # straight up: the object may not wander sideways
@@ -88,12 +93,14 @@ env:
   grip_band_bonus: 0.05
 
   grasp_bonus: 0.05
-  lift_progress_gain: 10.0     # x lift_height_m = 0.8 in total, paid once, as progress
+  lift_progress_gain: 30.0     # x lift_height_m = 3.0 in total, paid once, as progress. At 1.0
+                               # going up was not worth discovering.
+  pinch_once_bonus: 2.0        # grab stage: the seated pinch is a milestone, not an income
   drift_penalty: 2.0           # per metre sideways per step while lifting: a cost
   overshoot_penalty: 2.0       # per metre above the band
   hover_speed_penalty: 0.05    # at height, moving costs and being still is free
-  carry_bonus: 0.05
-  lead_bonus: 0.20             # food ahead of the jaws
+  carry_bonus: 0.0             # was per-step rent: with lead_bonus, 105 an episode vs success 50
+  lead_bonus: 0.0              # 'food leads the jaws' stays REQUIRED for success; it just is not paid
   speed_penalty: 2.0
   drop_penalty: 2.0
   self_collision_penalty: 0.5

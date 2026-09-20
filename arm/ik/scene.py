@@ -78,6 +78,10 @@ FINGER_OFFSET_M = float(os.environ.get("YAM_FINGER_OFFSET_M", "0.0"))
 # fingertip grasps. Rows down the whole face let a deep grasp count and move the TCP ~19 mm
 # toward the base. The tip rows stay: a short object on a table can only reach that far in.
 PAD_ROWS_Z = (0.078, 0.070, 0.060, 0.050, 0.040, 0.030, 0.020)
+# The real claws have rubber pads. MuJoCo uses the larger of the two surfaces' coefficients and
+# everything was 1.0; rubber on plastic/ceramic is 1.0-1.5+. Sliding, then torsional (doubled:
+# resists the object twisting in the grip), then rolling.
+PAD_FRICTION = os.environ.get("YAM_PAD_FRICTION", "1.5 0.02 0.001")
 GRIP_KV = float(os.environ.get("YAM_GRIP_KV", "30"))
 
 # the user, seated across the table from the arm (metres, robot base frame)
@@ -199,7 +203,7 @@ def _centre_fingers(src: str) -> str:
         d0 = src.index(f'<body name="{down}"')
         d1 = src.index("</body>", d0)
         linkage = src[r0:d0].replace(blue, 'rgba="0 0 0 0" contype="0" conaffinity="0"')
-        finger = (src[d0:d1].replace('class="collision"', 'class="collision" group="2"')
+        finger = (src[d0:d1].replace('class="collision"', f'class="collision" group="2" friction="{PAD_FRICTION}"')
                             .replace(blue, 'rgba="0.13 0.13 0.15 1"'))
         first = finger.index("<geom")
         finger = finger[:first] + wedge + finger[first:]
@@ -207,7 +211,7 @@ def _centre_fingers(src: str) -> str:
         if n != 6:
             raise RuntimeError(f"{ARM_XML}: expected 6 stock pads on {down}, found {n}")
         finger = finger.rstrip() + "".join(
-            f'\n                        <geom class="sphere_collision" pos="{x:g} -0.0004 {z:g}"/>'
+            f'\n                        <geom class="sphere_collision" friction="{PAD_FRICTION}" pos="{x:g} -0.0004 {z:g}"/>'
             for z in PAD_ROWS_Z for x in (0.003, -0.003)) + "\n                      "
         src = src[:r0] + linkage + finger + src[d1:]
     for mesh in ("model2__14", "model2__15", "model2__16", "model2__17"):

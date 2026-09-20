@@ -52,7 +52,7 @@ def newest_checkpoint(run_dir: Path, stage: str):
         stats = zip_path.with_name(
             zip_path.name.replace("_steps.zip", "_steps.pkl")
                          .replace(f"ppo_{stage}_", f"ppo_{stage}_vecnormalize_"))
-        if stats.exists() and (best is None or int(match.group(1)) > best[0]):
+        if stats.exists() and stats.stat().st_size and zip_path.stat().st_size and (best is None or int(match.group(1)) > best[0]):
             best = (int(match.group(1)), zip_path, stats)
     if best is None:
         raise SystemExit(f"no checkpoint for stage {stage!r} in {run_dir}")
