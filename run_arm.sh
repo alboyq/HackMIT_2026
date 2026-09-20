@@ -7,6 +7,8 @@
 cd "$(dirname "$0")"
 export YAM_MENAGERIE=$PWD/third_party/mujoco_menagerie/i2rt_yam YAM_REAL_ARM=I_AM_AT_THE_ARM_WITH_THE_ESTOP
 PY=/home/asus/HackMIT_2026/.venv/bin/python
+mkdir -p runs/real_arm; LOG=runs/real_arm/$(date +%H%M%S)_$1.log
+exec > >(tee $LOG) 2>&1
 case "$1" in
   hold)      $PY arm/real/real_arm.py --hold-test 10 ;;
   grip)      $PY arm/real/real_arm.py --hold-test 12 --grip ;;
