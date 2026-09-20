@@ -104,7 +104,34 @@ The reason it compounds is accuracy: the policy's open-loop error is comparable 
 has to predict. A grasp needs roughly 1 cm at 0.4 m of reach, i.e. **about 1.5 deg**; the best
 checkpoint so far is 2.9 deg.
 
-### What is actually left
+### The floor is robust — and one replication delta was never tested
+
+Measured train-set MAE (first action, 150 frames, `n_action_steps=1`):
+
+| | 4k | 8k | 12k | 16k | 20k | baseline |
+|---|---|---|---|---|---|---|
+| `yam_v7` 5 targets, 1,865 demos | 4.92 | 3.95 | 2.90 | 3.16 | 3.06 | 20.2 |
+| `yam_v9` 2 targets, no erasing | 4.26 | 3.26 | 2.82 | — | — | 15.0 |
+
+Narrowing five grasp geometries to two bought **0.08 deg** at step 12000. The ~3 deg floor holds
+across: 5 vs 2 objects, 887 vs 1,865 demos, batch 8 vs 24, wide vs pose-B camera, table vs no
+table, blur on vs off, erasing on vs off, and 4k to 20k steps. It is none of those.
+
+Note `yam_v9` is only better in ABSOLUTE terms; against its own baseline it is slightly worse
+(4.6x vs 5.1x). The task got smaller, the model did not get better. Absolute is what control
+cares about, so the gain is real but small.
+
+**The untested delta: control rate.** This pipeline runs **10 Hz with chunk 20**; the SO-101
+recipe that scored 86 % ran **25 Hz with chunk 50**. Both span 2.0 s, which is why it was written
+off as equivalent — wrongly. At 10 Hz each commanded action holds for **100 ms** against 40 ms,
+so the same per-step error produces **2.5x more positional drift before the policy re-observes**.
+The measured failure is compounding divergence from a bounded per-step error, so this is the one
+deviation whose mechanism matches the symptom. The original handoff named it as suspect #2 and it
+was never tried. `yam_v10` tests it (`YAM_HZ=25`, `CHUNK_SIZE=50`).
+
+### What is left after that
+
+
 
 Fit improves with optimiser steps and shows no plateau:
 
