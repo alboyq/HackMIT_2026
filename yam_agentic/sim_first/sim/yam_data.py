@@ -40,6 +40,16 @@ WRIST_RES = int(os.environ.get("YAM_WRIST_RES", "160"))
 BG_DIR = Path(os.environ.get("YAM_BG", Path(__file__).resolve().parent / "bg_train"))
 AUG = os.environ.get("YAM_AUG", "1") == "1"
 LAT = tuple(int(v) for v in os.environ.get("YAM_LAT", "0 2").split())
+# Scene-camera placement. "poseB" = tight jitter about a high look-down, the viewpoint the
+# SO-101 measurements favoured; "wide" = the original 50x45x45 cm box.
+CAM_WIDE = os.environ.get("YAM_CAM", "poseB") == "wide"
+CAM_POS = np.array([float(v) for v in os.environ.get("YAM_CAM_POS", "-0.02 0.35 0.78").split()])
+CAM_TGT = np.array([float(v) for v in os.environ.get("YAM_CAM_TGT", "0.38 0.0 0.11").split()])
+CAM_JIT = np.array([float(v) for v in os.environ.get("YAM_CAM_JIT", "0.06 0.06 0.05").split()])
+CAM_FOVY = tuple(float(v) for v in os.environ.get("YAM_CAM_FOVY", "58 66").split())
+
+KEEP_TABLE = os.environ.get("YAM_TABLE", "1") == "1"   # render the real table instead of a background photo
+BLUR_AUG = os.environ.get("YAM_BLUR", "0") == "1"      # HQ camera: no defocus/motion blur by default
 AUG_PROFILE = os.environ.get("YAM_AUG_PROFILE", "heavy")       # "heavy" = yam_v1; "real" for everything after
 GREY = 127
 STATE_DIM, ACTION_DIM = 17, 7
@@ -78,7 +88,18 @@ class DataScene(YamScene):
             if x == arm_root:
                 arm_bodies.add(b)
         self.arm_geoms = np.array([g for g in range(m.ngeom) if m.geom_bodyid[g] in arm_bodies])
-        self.keep = np.concatenate([self.arm_geoms, np.array(list(self.obj_geom.values())), self.user_geoms])
+        # Keep the TABLE in frame by default. Replacing it with a background photo left the
+        # objects floating on arbitrary images: no support plane, no consistent depth cue, and a
+        # mismatch with reality, where there is always a table. Its tint is randomised per
+        # episode so the policy does not overfit one surface. YAM_TABLE=0 restores the old
+        # everything-is-background behaviour.
+        self.table_geom = gid("table")
+        self.table_mat = int(m.geom_matid[self.table_geom])
+        self.table_rgba0 = m.mat_rgba[self.table_mat].copy() if self.table_mat >= 0 else None
+        keep = [self.arm_geoms, np.array(list(self.obj_geom.values())), self.user_geoms]
+        if KEEP_TABLE:
+            keep.append(np.array([self.table_geom]))
+        self.keep = np.concatenate(keep)
         self.cid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "scene_cam")
         self.cam_body_pos = m.body_pos[m.cam_bodyid[self.cid]].copy()
         self.n_sub = max(1, int(round(1.0 / HZ / m.opt.timestep)))
@@ -154,13 +175,25 @@ class DataScene(YamScene):
         m.light_diffuse[:] = np.clip(lf * rng.uniform(0.5, 1.3), 0, 1)
         m.vis.headlight.ambient[:] = np.clip(ha * rng.uniform(0.6, 1.7), 0, 1)
         m.vis.headlight.diffuse[:] = np.clip(hd * rng.uniform(0.6, 1.4), 0, 1)
+        if KEEP_TABLE and self.table_rgba0 is not None:                 # vary the surface, keep the plane
+            tint = np.clip(self.table_rgba0[:3] * rng.uniform(0.45, 1.35, 3), 0.05, 1.0)
+            m.mat_rgba[self.table_mat] = np.append(tint, 1.0)
         mujoco.mj_forward(m, d)
-        # --- scene camera: wide box on the robot's left, must frame every present object and the mouth
+        # --- scene camera. The SO-101 project measured viewpoint as the single decisive factor:
+        # a high ~50 deg look-down ("pose B") scored 83-86 % where a low ~21 deg view scored 64 %
+        # with everything else identical, and widening placement randomisation did NOT buy
+        # tolerance (jar_act_v3c). So the default is a tight jitter about a pose-B-like nominal.
+        # YAM_CAM=wide restores the old 50x45x45 cm box.
         must = [self.object_pos(n) for n in present] + [self.site("mouth")]
         for _ in range(300):
-            pos = np.array([rng.uniform(-0.35, 0.15), rng.uniform(0.20, 0.65), rng.uniform(0.30, 0.75)])
-            tgt = np.array([0.40, 0.0, 0.12]) + rng.uniform(-0.08, 0.08, 3)
-            fovy, roll = rng.uniform(50, 75), np.radians(rng.uniform(-5, 5))
+            if CAM_WIDE:
+                pos = np.array([rng.uniform(-0.35, 0.15), rng.uniform(0.20, 0.65), rng.uniform(0.30, 0.75)])
+                tgt = np.array([0.40, 0.0, 0.12]) + rng.uniform(-0.08, 0.08, 3)
+                fovy, roll = rng.uniform(50, 75), np.radians(rng.uniform(-5, 5))
+            else:
+                pos = CAM_POS + rng.uniform(-CAM_JIT, CAM_JIT, 3)
+                tgt = CAM_TGT + rng.uniform(-0.03, 0.03, 3)
+                fovy, roll = rng.uniform(*CAM_FOVY), np.radians(rng.uniform(-3, 3))
             m.cam_pos[self.cid] = pos - self.cam_body_pos
             m.cam_quat[self.cid] = lookat_quat(pos, tgt, roll)
             m.cam_fovy[self.cid] = fovy
@@ -221,8 +254,12 @@ class DataScene(YamScene):
             ops["_erase"] = int(rng.integers(0, 3)) if rng.random() < 0.3 else 0
             return ops
         ops["exposure"], ops["gamma"] = rng.uniform(0.7, 1.4), rng.uniform(0.85, 1.2)
-        if rng.random() < 0.35: ops["blur"] = float(np.clip(abs(rng.normal(0, 0.6)), 0.2, 1.6))
-        if rng.random() < 0.15: ops["mblur"] = rng.uniform(3, 6)
+        # Defocus/motion blur is OFF by default: the deployment camera is a good one, and the
+        # SO-101 stress test showed blur is the one cliff (84 % -> 48 % at sigma 2 px), so training
+        # on it spends capacity on a corruption we will not meet. YAM_BLUR=1 restores it.
+        if BLUR_AUG:
+            if rng.random() < 0.35: ops["blur"] = float(np.clip(abs(rng.normal(0, 0.6)), 0.2, 1.6))
+            if rng.random() < 0.15: ops["mblur"] = rng.uniform(3, 6)
         if rng.random() < 0.7: ops["noise"] = rng.uniform(0.004, 0.03)
         if rng.random() < 0.2: ops["vignette"] = rng.uniform(0.1, 0.35)
         if rng.random() < 0.6: ops["jpeg"] = rng.uniform(45, 95)
