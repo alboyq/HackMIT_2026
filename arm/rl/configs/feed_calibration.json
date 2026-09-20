@@ -1,10 +1,14 @@
 {
-  "contact_size_deg_median": 50.855385729342196,
-  "contact_size_deg_min": 44.05764301288179,
-  "contact_size_deg_p10": 49.20357609341897,
-  "contact_size_deg_max": 55.52441064933622,
-  "n_touches": 28,
-  "pct_of_image_width_150deg_fisheye": 38.89919925710727,
+  "contact_size_deg_median": 50.89079420974668,
+  "contact_size_deg_mean": 51.31795122161239,
+  "contact_size_deg_sd": 2.915465401293412,
+  "contact_size_deg_p05": 47.15308812455229,
+  "contact_size_deg_p10": 47.61164789262419,
+  "contact_size_deg_min": 44.46200038800064,
+  "contact_size_deg_max": 58.328280120000514,
+  "n_touches": 137,
+  "pct_of_image_width_150deg_fisheye": 38.9262831443867,
   "assumed_face_width_m": 0.145,
-  "note": "angular face width when the food first touched the face; sim, contact detection on, head size +-8%"
+  "source": "calibration_contact_on",
+  "note": "angular face width when the FOOD first touched the face. Sim, contact detection on, decisions from wrist camera + motor feedback only, head size +-8%, ten skin tones."
 }

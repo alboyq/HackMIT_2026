@@ -9,6 +9,36 @@ which is a *different and still-valid* route to the same demo).
 
 ---
 
+## 0000. INPUT AUDIT + RECORDED DATA (2026-09-20 ~06:40 PDT)
+
+**Rule: every DECISION comes from the wrist camera + motor feedback. Simulator truth is for SCORING only.**
+`SENSORS_ONLY=1` (default) in `hybrid_feed.py`. What was leaking and is now fixed:
+- pinch -> lift hand-over used contact truth and the true object pose. Now `jaws_blocked()`: jaws commanded
+  further shut than they are, stopped, not empty-closed (the gripper encoder), plus the CAMERA's estimate of
+  how deep the object sits.
+- the lift servoed on the true object position and ended on true object height. Now the camera's object
+  estimate, and TCP rise from the arm's own FK.
+- the shield measured true arm-to-person geometry. Now `shield_cam()`: the person is where the camera last
+  saw the face (camera error included), the arm is where its joint angles say (FK).
+Result, same seeds: 26/40 with truth in the loop vs 26/40 and 27/40 sensors-only. Nothing needed the truth.
+STILL PRIVILEGED (flagged, not fixed): the reach -> pinch switch is judged inside the env by true distance;
+the first camera reading of an episode is given even when the object is not yet in view (stands in for an
+initial scan pose, which the real system needs); the ONE contact the feed may use is food-to-face, and only
+in CALIBRATE mode.
+
+**Recorded data** (`RECORD_DIR=...`; one JSON per episode: per-step phase, face width in degrees, closing
+speed, six joint angles, gripper opening, jaws_blocked, food/arm touch flags, plus episode metadata).
+Summaries are committed in `arm/rl/data/`; the raw per-step files (35 MB) are in `runs/feed_data/` on the GX10.
+- `calibration_contact_on`, 200 runs: **137 food-to-face touches, face width median 50.9 deg (mean 51.3,
+  sd 2.9, p05 47.2, min 44.5, max 58.3) = 39% of image width on the 150-deg lens**; contact closing speed
+  max 0.013 m/s. Apple touches at 52.7 deg, mug 50.0, block 49.9. Head size moves it +-1.3 deg over +-8%.
+- `feed_contact_off`, 150 runs stopping on that benchmark with NO contact information: fed 103/150 = 69%,
+  fast-arrival/arm-contact 0, dropped 1, closing speed near the face max 0.013 m/s, food ends 44 mm in front
+  of the mouth and 12 mm to the side; the food grazed the face anyway in 6 (at the crawl).
+`arm/rl/scripts/aggregate_feed_data.py <dir> [--write-calibration]` rebuilds all of this.
+
+---
+
 ## 000. FEEDING (2026-09-20 ~05:30 PDT) - scripted, camera-only, on top of the final grasp
 
 `arm/rl/scripts/hybrid_feed.py` (headless, numbers) / `watch_feed.py` (GX10 monitor; `CALIBRATE=1` for the

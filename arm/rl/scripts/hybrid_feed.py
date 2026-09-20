@@ -33,7 +33,7 @@ os.environ["YAM_HANDOFF_REUSE"] = "0"
 from stable_baselines3 import PPO
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hybrid_pick import lift_action, shield  # noqa: E402
+from hybrid_pick import lift_action, shield, shield_cam  # noqa: E402
 
 from hackmit_rl.config import load_config
 from hackmit_rl.envs import OpenYAMFeedEnv
@@ -44,6 +44,8 @@ CALIBRATE = os.environ.get("CALIBRATE", "0") == "1"
 CAL_FILE = "arm/rl/configs/feed_calibration.json"
 DT = 1.0 / 30.0
 TRACE_ROWS = []
+RECORD_DIR = os.environ.get("RECORD_DIR", "")               # per-step data for every episode
+SENSORS_ONLY = os.environ.get("SENSORS_ONLY", "1") == "1"     # decide ONLY from wrist camera + motor feedback
 STEP_HOOK = None            # a viewer sets this: f(env, phase, face_size_deg, outcome_dict, info, context)
 
 # ---- motion limits. Brisk pulling back, gentle going in, a crawl at the face.
@@ -155,6 +157,27 @@ def contacts(e):
     return food, arm
 
 
+def jaws_blocked(e):
+    """MOTOR FEEDBACK pinch detection: the jaws are commanded further shut than they are, they have stopped
+    moving, and they are not empty-closed. That is what having hold of something looks like from the
+    gripper's own encoder; no contact sensor and no simulator truth involved."""
+    j = e.model.joint("left_finger")
+    q = float(e.data.qpos[e.model.jnt_qposadr[j.id]])
+    qd = float(e.data.qvel[e.model.jnt_dofadr[j.id]])
+    return (q - float(e.data.ctrl[e.grip_aid])) > 0.003 and abs(qd) < 0.003 and q > 0.006
+
+
+def camera_object(e):
+    """The object as the WRIST CAMERA reports it (bias, jitter, frozen at last-seen when out of view)."""
+    return np.asarray(e._perceived(e.scene.object_pos(e.name), e.obj_bias, "object_jitter_m"), dtype=float)
+
+
+def camera_head(e):
+    """Head centre from the camera's last sighting of the mouth plus nominal face geometry."""
+    mouth = np.asarray(e._perceived(e.scene.site("mouth"), e.mouth_bias, "mouth_jitter_m"), dtype=float)
+    return mouth + np.array([0.089, 0.0, 0.048])
+
+
 def approach_speed(size, contact_size):
     """The speed allowed at this apparent face size. Full speed far out, the crawl from 8 deg before the
     calibrated touch size. This schedule, not the stop, is what prevents a fast arrival: even if the stop
@@ -222,13 +245,19 @@ def main(n_episodes=None, report=True):
                  vmax=0.0, amax=0.0, ahead=None, side=None, phase="", speed=0.0, max_lift=0.0, frozen=0, steps=0,
                  seated_pinch=False)
         hold, vs, prev_vs, prev_tcp = 0, np.zeros(3), np.zeros(3), e._tcp().copy()
+        head_est, obj_at_pinch, log = camera_head(e), camera_object(e), []
         for i in range(800):
             size = 0.0
             if phase == "pinch":
                 a, _ = policy.predict(grasp_obs()[None], deterministic=True)
                 a = np.asarray(a, dtype=np.float32)
             elif phase == "lift":
-                a = lift_action(e, anchor, jacp, jacr, info.get("lift_m", 0.0))
+                if SENSORS_ONLY:
+                    rise = float(e._tcp()[2] - anchor[2])                      # arm FK = motor feedback
+                    a = lift_action(e, anchor, jacp, jacr, rise,
+                                    err_xy=(obj_at_pinch - camera_object(e))[:2], head_est=head_est)
+                else:
+                    a = lift_action(e, anchor, jacp, jacr, info.get("lift_m", 0.0))
                 a[0, 6] = hold_ctrl
             else:
                 seen, bearing, size = feeder.face_measurement(rng)
@@ -268,7 +297,7 @@ def main(n_episodes=None, report=True):
                     a = feeder.action(np.zeros(3), Rt, V_CRAWL, hold_ctrl, 0.0)
                     hold += 1
             if phase in ("pinch", "lift", "retreat"):
-                a, _, froze = shield(e, a)
+                a, _, froze = shield_cam(e, a, head_est) if SENSORS_ONLY else shield(e, a)
                 o["frozen"] += int(froze)
                 if froze and phase == "lift":
                     # The object is close to the person, so lifting straight up raises the forearm toward his
@@ -314,22 +343,43 @@ def main(n_episodes=None, report=True):
                                   f"gap {1000*gap:5.1f} width {1000*e.width[e.name]:5.1f} | grip {tot:5.1f} N ({npad} pad, {nplate} plate contacts) | tool_z {ta_[2]:+.2f}")
             food, arm = contacts(e)
             done = False
+            if RECORD_DIR:
+                fj = e.model.joint("left_finger")
+                log.append(dict(t=i, phase=phase, face_deg=round(float(size), 3),
+                                closing=round(float(o.get("closing", 0.0)), 5), speed=round(sp, 5),
+                                q=[round(float(x), 5) for x in e.data.qpos[e.qadr]],
+                                grip=round(float(e.data.qpos[e.model.jnt_qposadr[fj.id]]), 5),
+                                jaws_blocked=bool(jaws_blocked(e)), food_touch=bool(food), arm_touch=bool(arm)))
             if arm:
                 o["arm_hit"], o["arm_hit_speed"] = arm, closing
                 done = True
             elif phase == "pinch":
-                ok = info["pinched"] and info["seat_frac"] >= min_seat
+                if SENSORS_ONLY:
+                    # hand over on the gripper's own feedback + the camera's view of how deep the object sits
+                    Rt_ = e.data.site_xmat[e.tool.site_id].reshape(3, 3)
+                    ax_ = Rt_ @ e.tool.tool_local
+                    ins = float((camera_object(e) - (e._tcp() + ax_ * float(e.tip_ahead or 0.036))) @ (-ax_))
+                    half_w = 0.5 * float(e.width[e.name]) * (1.0 + e.width_bias)
+                    ok = jaws_blocked(e) and ins / max(1e-3, half_w - 0.005) >= min_seat
+                else:
+                    ok = info["pinched"] and info["seat_frac"] >= min_seat
                 seated = seated + 1 if ok else 0
                 if seated >= 3:
                     phase, anchor = "lift", e._tcp().copy()
                     o["seated_pinch"] = True
+                    obj_at_pinch = camera_object(e)
                     q_now = float(e.data.qpos[e.model.jnt_qposadr[e.model.joint("left_finger").id]])
                     lo, hi = float(e.grip_range[0]), float(e.grip_range[1])
                     hold_ctrl = float(np.clip(2.0 * (max(0.0, q_now - 0.5 * SQUEEZE_M) - lo) / (hi - lo) - 1.0, -1, 1))
                 done = info["stage_drift_m"] > 0.09 or i > 250
             elif phase == "lift":
-                if info["lift_m"] >= 0.10:
-                    o["picked"], phase = True, "retreat"
+                if SENSORS_ONLY:
+                    up = float(e._tcp()[2] - anchor[2]) >= 0.10 and jaws_blocked(e)
+                else:
+                    up = info["lift_m"] >= 0.10
+                if up:
+                    phase = "retreat"
+                    o["picked"] = bool(info["lift_m"] >= 0.08)   # SCORING may use truth; the decision did not
                 done = i > 420
             else:
                 if float(np.linalg.norm(e.scene.object_pos(e.name) - tcp)) > 0.08:
@@ -348,6 +398,14 @@ def main(n_episodes=None, report=True):
         o["ahead"] = 1000.0 * max(0.0, float(rel @ FORWARD) - 0.5 * float(e.width[e.name]))
         o["side"] = 1000.0 * float(np.linalg.norm(rel - (rel @ FORWARD) * FORWARD))
         o["result"] = outcome(o)
+        if RECORD_DIR:
+            os.makedirs(RECORD_DIR, exist_ok=True)
+            meta = {k: (float(v) if isinstance(v, (np.floating, np.integer)) else v) for k, v in o.items()}
+            meta.update(seed=int(os.environ.get("SEED", "0")), episode=ep, head_scale=float(e.head_scale),
+                        object_width_m=float(e.width[e.name]), calibrate=CALIBRATE, sensors_only=SENSORS_ONLY)
+            name = "s" + os.environ.get("SEED", "0") + "_ep" + str(ep).zfill(4) + ".json"
+            with open(os.path.join(RECORD_DIR, name), "w") as fh:
+                json.dump(dict(meta=meta, steps=log), fh)
         if os.environ.get("TRACE"):
             if o["dropped"]:
                 print(f"--- DROP ep{ep} {e.name} in {o['drop_phase']}")

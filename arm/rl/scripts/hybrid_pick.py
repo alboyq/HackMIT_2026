@@ -98,7 +98,7 @@ def shield(e, a):
     return a, best, False
 
 
-def lift_action(e, anchor, jacp, jacr, lifted):
+def lift_action(e, anchor, jacp, jacr, lifted, err_xy=None, head_est=None):
     """One control step of the scripted lift, as a normalised env action."""
     md, d = e.model, e.data
     mujoco.mj_jacSite(md, d, jacp, jacr, e.tool.site_id)
@@ -110,11 +110,18 @@ def lift_action(e, anchor, jacp, jacr, lifted):
         err = e.stage_object_start[:2] - e.scene.object_pos(e.name)[:2]
     else:
         err = anchor[:2] - tcp[:2]
+    if err_xy is not None:                 # caller supplies the CAMERA's estimate of the sideways error
+        err = np.asarray(err_xy, dtype=float)
     dxy = np.clip(K_XY * err, -0.003, 0.003)
     # HARD KEEP-OUT. The script cannot be taught by a penalty, so it is simply not allowed to close on
     # the person: inside the margin, any motion component toward the head is removed.
-    head = d.xpos[md.body("user_head").id]
-    gap = float(min(np.linalg.norm(d.geom_xpos[g] - head) for g in e.arm_geoms)) - 0.095
+    if head_est is not None:               # where the camera last saw the person, not where the sim knows he is
+        head = np.asarray(head_est, dtype=float)
+        gap = float(min(np.linalg.norm(d.xpos[b] - head)
+                        for b in e.swing_bodies + [md.body("link_6").id])) - 0.115
+    else:
+        head = d.xpos[md.body("user_head").id]
+        gap = float(min(np.linalg.norm(d.geom_xpos[g] - head) for g in e.arm_geoms)) - 0.095
     move = np.array([dxy[0], dxy[1], dz])
     if gap < KEEP_OUT:
         toward = (head - tcp) / max(1e-9, float(np.linalg.norm(head - tcp)))
@@ -191,3 +198,48 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def shield_cam(e, a, head_est, margin=0.07):
+    """The shield WITHOUT simulator truth. The person is wherever the wrist camera last saw the face
+    (`head_est`, camera error included); the arm is where its own joint angles say it is (FK). Keep-out =
+    a head sphere (0.115 m, the largest half-axis of an adult head) plus a torso box hanging below it, both
+    grown by `margin`. If an arm point is inside and the commanded motion carries it further in, that
+    point is backed straight out at 3 cm/s. Returns (action, clearance_m, tripped)."""
+    global _jp
+    md, d = e.model, e.data
+    if _jp is None:
+        _jp = np.zeros((3, md.nv))
+    head = np.asarray(head_est, dtype=float)
+    torso_c, torso_h = head + np.array([0.12, 0.0, -0.22]), np.array([0.10, 0.17, 0.19])
+    Rt = d.site_xmat[e.tool.site_id].reshape(3, 3)
+    wrist = md.body("link_6").id
+    tip = e._tcp() + (Rt @ e.tool.tool_local) * float(e.tip_ahead or 0.036)
+    pts = [(d.xpos[b].copy(), b) for b in e.swing_bodies + [wrist]]
+    pts += [(e._tcp().copy(), wrist), (tip, wrist)]
+    best, hit = 1e9, None
+    for pnt, body in pts:
+        v = pnt - head
+        d_head = float(np.linalg.norm(v)) - 0.115
+        q = np.abs(pnt - torso_c) - torso_h
+        d_torso = float(np.linalg.norm(np.maximum(q, 0.0)) + min(0.0, float(np.max(q))))
+        if d_head <= d_torso:
+            dist, away = d_head, v / max(1e-9, float(np.linalg.norm(v)))
+        else:
+            dist = d_torso
+            away = np.sign(pnt - torso_c) * (q == np.max(q))
+            away = away / max(1e-9, float(np.linalg.norm(away)))
+        if dist - margin < best:
+            best, hit = dist - margin, (pnt, body, away)
+    if hit is None or best > 0.0:
+        return a, best, False
+    pnt, body, away = hit
+    mujoco.mj_jac(md, d, _jp, None, pnt, int(body))
+    Jp = _jp[:, e.dadr]
+    v_cmd = Jp @ (np.asarray(a[0][:6], dtype=float) * float(e.ecfg["action_delta_rad"]))
+    if float(v_cmd @ away) >= 0.0:
+        return a, best, False                                    # already heading out
+    dq = Jp.T @ np.linalg.solve(Jp @ Jp.T + 1e-4 * np.eye(3), away * 0.03 / 30.0)
+    a = np.array(a, dtype=np.float32, copy=True)
+    a[0, :6] = np.clip(dq / float(e.ecfg["action_delta_rad"]), -1.0, 1.0)
+    return a, best, True
