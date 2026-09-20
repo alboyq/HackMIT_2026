@@ -39,5 +39,9 @@ model's tool point. Still to do before `RealArm` gets a backend: a startup step 
 lap rule and puts the limits in the motor's current numbers; then the physical checks and CAN
 grounding listed under `outstanding`.
 
+**Early replay tool — just the beginning.** [`arm_replay/`](arm_replay/) replays hand-taught poses on the real arm in the
+motors' own numbers, with gravity feed-forward. It is a first version with **known hazards** (if its return aborts it
+releases the arm) and hard-coded paths; read its README before running anything.
+
 Full method, per-joint hard stops, caveats and remaining steps are in that file and in
 `ARM_NOTES.md` on the [`arm-ik-rl`](../../tree/arm-ik-rl) branch, where the arm code lives.

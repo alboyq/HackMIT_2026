@@ -1,0 +1,36 @@
+[01:37:40] recorded pose '5' (2026-09-19 23:56:59): [-1.9518, -5.3336, -6.0241, -0.2916, 0.1761, 0.1089]  laps [0, 1, 1, 0, 0, 0]
+[01:37:40] bus can0 via socketcan, state=BusState.ACTIVE
+[01:37:41] watchdog OFF on all six
+[01:37:41] measured pose: [-1.5524, -6.2789, -6.2736, 0.3096, 0.0261, 0.012]
+[01:37:41] target       : [-1.8719, -5.5227, -6.074, -0.1714, 0.1461, 0.0895]   (fraction 0.8)
+[01:37:41] travel       : j1:-0.320  j2:+0.756  j3:+0.200  j4:-0.481  j5:+0.120  j6:+0.078
+[01:37:41] furthest     : 0.756 rad -> 4.8s at peak 0.25 rad/s, then hold 5.0s and ramp back
+[01:37:41] feed-forward torque N.m  at start:  +0.0  +1.6  +8.8  +1.6  -0.0  -0.0
+           at target:  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0  |  peak along the path:  0.0  1.6  9.4  1.8  0.1  0.0
+[01:37:41] torque budget (0.4 x TMAX) N.m: 11.2 11.2 11.2  4.0  4.0  4.0   factors [1.  1.1 1.4 1.  1.  1. ]
+[01:37:41] session check OK, travel guard OK
+[01:37:41] enabled+holding 0x01 at -1.5524 [normal]
+[01:37:41] enabled+holding 0x02 at -6.2789 [normal]
+[01:37:41] enabled+holding 0x03 at -6.2736 [normal]
+[01:37:41] enabled+holding 0x04 at +0.2699 [normal]
+[01:37:41] enabled+holding 0x05 at +0.0261 [normal]
+[01:37:41] enabled+holding 0x06 at +0.0124 [normal]
+[01:37:41] settling 1.0s (feed-forward ramping in)
+[01:37:42] MOVING
+[01:37:42]   move   lag +0.000 +0.001 +0.005 -0.068 -0.001 -0.000 | torque  -0.0  +1.5  +8.4  +2.0  -0.0  -0.0 | ff  +0.0  +1.6  +8.9  +1.6  -0.0  -0.0
+[01:37:43]   move   lag +0.004 -0.020 -0.009 -0.010 -0.011 -0.008 | torque  -0.6  +3.3 +10.1  +1.7  +0.2  +0.1 | ff  -0.3  +1.7  +9.4  +1.6  +0.1  -0.0
+[01:37:44]   move   lag +0.004 -0.017 -0.019 -0.013 -0.009 -0.003 | torque  -0.6  +2.4 +11.0  +1.9  +0.1  +0.0 | ff  -0.3  +1.2  +9.6  +1.7  +0.1  +0.0
+[01:37:45]   move   lag +0.005 -0.013 -0.017 -0.016 -0.008 -0.007 | torque  -0.7  +1.4 +10.9  +1.8  +0.1  +0.1 | ff  -0.3  +0.5  +9.5  +1.6  +0.1  +0.0
+[01:37:46]   move   lag +0.006 -0.008 -0.016 -0.011 -0.010 -0.009 | torque  -0.9  +0.4 +10.5  +1.6  +0.2  +0.1 | ff  -0.3  -0.1  +9.1  +1.5  +0.1  -0.0
+[01:37:46] AT TARGET at t=5.8s -- holding
+[01:37:47]   hold   lag +0.007 -0.008 -0.018 -0.003 -0.015 -0.008 | torque  -0.6  -0.0 +10.1  +1.5  +0.2  +0.0 | ff  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0
+[01:37:48]   hold   lag +0.007 -0.008 -0.018 -0.003 -0.015 -0.007 | torque  -0.6  -0.0 +10.1  +1.5  +0.2  +0.0 | ff  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0
+[01:37:49]   hold   lag +0.007 -0.008 -0.018 -0.003 -0.015 -0.007 | torque  -0.6  -0.0 +10.1  +1.5  +0.2  +0.0 | ff  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0
+[01:37:50]   hold   lag +0.007 -0.008 -0.018 -0.003 -0.015 -0.007 | torque  -0.6  -0.0 +10.1  +1.5  +0.2  +0.0 | ff  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0
+[01:37:51]   hold   lag +0.007 -0.008 -0.018 -0.003 -0.015 -0.007 | torque  -0.6  -0.0 +10.1  +1.5  +0.2  +0.0 | ff  +0.0  -0.6  +8.7  +1.5  +0.1  -0.0
+[01:37:51] held 5.0s
+[01:37:51] ramping back to the start pose from the last commanded setpoint (no reads, no re-seed)
+[01:37:54] controlled return failed: motor 0x03 is 0.030 rad behind its setpoint (limit 0.030 rad = the torque budget 40% of 28.0 N.m minus the 9.0 N.m of feed-forward). Stopping.
+[01:37:54] all motors disabled
+[01:37:54] HOLD SUMMARY  mean lag: +0.007 -0.008 -0.018 -0.003 -0.015 -0.007  | worst |lag| over the run: 0.008 0.022 0.030 0.130 0.015 0.012
+[01:37:54] telemetry saved: /home/asus/fk_check/logs/run2_20260920_013754.json
