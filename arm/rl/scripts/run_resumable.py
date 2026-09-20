@@ -69,6 +69,24 @@ class StopOnSignal(BaseCallback):
         return not self.triggered
 
 
+def reset_gripper_head(model: PPO) -> None:
+    """Un-saturate the gripper output when leaving reach.
+
+    Reach charges for any closing and nothing charges for overshooting the action clip, so it
+    hands over a gripper mean far past +1 (measured: +1.87 unclipped, std 0.54). Every sample
+    then clips to the same fully-open command, the close reward sees no variance, and the
+    gradient is exactly zero: grasp sat at 0/30 jaws-ever-closed for 1.4M steps while forcing
+    the jaws shut at the same pose succeeded 8/20. Only the gripper row is touched; the arm
+    positioning that reach learned is kept.
+    """
+    with torch.no_grad():
+        before = float(model.policy.action_net.bias[-1])
+        model.policy.action_net.weight[-1].zero_()
+        model.policy.action_net.bias[-1] = 0.0
+        model.policy.log_std[-1] = 0.0
+    print(f"[transfer] gripper head reset (bias {before:+.2f} -> 0, std -> 1.0)", flush=True)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="arm/rl/configs/feed.yaml")
@@ -99,6 +117,7 @@ def main() -> None:
 
     model_path, stats_path = (None, None) if args.fresh else newest_checkpoint(args.run_dir, args.stage)
     transferred = False
+    transferred_from = None
     if model_path is None and args.init_from and not args.fresh:
         # Curriculum transfer. The observation layout is identical across stages, so a
         # finished stage is a legitimate warm start for the next one.
@@ -106,6 +125,7 @@ def main() -> None:
             model_path, stats_path = newest_checkpoint(args.init_from, prior)
             if model_path:
                 transferred = True
+                transferred_from = prior
                 print(f"[transfer] seeding {args.stage} from {prior}: {model_path.name}")
                 break
     if model_path:
@@ -113,6 +133,8 @@ def main() -> None:
         env.training, env.norm_reward = True, True
         model = PPO.load(model_path, env=env, device="cpu",
                          tensorboard_log=str(args.run_dir / "tensorboard"))
+        if transferred and transferred_from == "reach":
+            reset_gripper_head(model)
         done = 0 if transferred else model.num_timesteps
         print(f"[resume] {model_path.name} at {done} steps; {max(0, total - done)} remaining")
         if done >= total:

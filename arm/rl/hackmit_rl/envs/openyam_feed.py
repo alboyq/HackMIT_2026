@@ -30,6 +30,7 @@ The layout is fixed across every stage so one stage's checkpoint seeds the next.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("MUJOCO_GL", "egl")
 
@@ -56,6 +57,16 @@ class OpenYAMFeedEnv(gym.Env):
         if self.stage not in STAGES:
             raise ValueError(f"unknown stage {self.stage!r}; expected one of {STAGES}")
         self.render_mode = render_mode
+        # Stage hand-off: a later stage starts from the state the FROZEN earlier stages leave
+        # the arm in, not from home. That is the point of splitting the task: grasp should
+        # learn to grasp, not to re-learn reaching, and it must cope with the pose reach
+        # actually delivers rather than an idealised one.
+        self.final_stage = self.stage
+        self.handoff = dict(self.ecfg.get("handoff") or {})
+        self._priors = None          # loaded lazily, inside the worker process
+        self.prior_hook = None       # viewers set this to draw the frozen stages too
+        self.handoff_ok = True
+        self.handoff_steps = 0
 
         self.scene = YamScene(objects=list(OBJECTS))
         self.model, self.data = self.scene.model, self.scene.data
@@ -227,8 +238,7 @@ class OpenYAMFeedEnv(gym.Env):
                                self.prev_action)).astype(np.float32)
 
     # ------------------------------------------------------------------ episode
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
-        super().reset(seed=seed)
+    def _reset_scene(self) -> None:
         self.scene.reset()
 
         self.name = OBJECTS[int(self.np_random.integers(len(OBJECTS)))]
@@ -304,27 +314,90 @@ class OpenYAMFeedEnv(gym.Env):
         self.food_point = self.mouth - approach * float(self.ecfg["food_gap_m"])
 
         self.reach_offset = np.array([0.0, 0.0, float(self.ecfg["reach_offset_z"])])
-        if self.stage == "present":
-            self.target = self.food_point.copy()
-        elif self.stage == "reach":
-            self.target = self.scene.object_pos(self.name) + self.reach_offset
-        else:
-            self.target = self.scene.object_pos(self.name).copy()
-
         self.filtered.fill(0)
         self.prev_action.fill(0)
-        self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
+        self.collisions = self.wall_hits = self.crush_steps = 0
         self.self_collisions = self.curl_steps = 0
         self.knocked = self.was_pinched = False
-        self.phase = 0
-        self.settle_calm = 0.0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self._sample_perception_bias()
         self.object_start = self.scene.object_pos(self.name).copy()
+
+    def _begin_stage(self, stage: str) -> None:
+        """Start `stage` from wherever the arm is now. The low-pass state and previous action
+        are deliberately NOT cleared: on the real arm one policy hands over to the next
+        mid-motion, and the next one sees that."""
+        self.stage = stage
+        obj_pos = self.scene.object_pos(self.name)
+        if stage == "present":
+            self.target = self.food_point.copy()
+            self.prev_dist = float(np.linalg.norm(self.target - obj_pos))
+        else:
+            self.target = obj_pos + self.reach_offset if stage == "reach" else obj_pos.copy()
+            self.prev_dist = float(np.linalg.norm(self.target - self._tcp()))
+        self.steps = self.hold_steps = 0
+        self.phase = 0
+        self.settle_calm = 0.0
         self.prev_tcp = self._tcp().copy()
-        self.prev_dist = float(np.linalg.norm(self.target - self._tcp()))
-        return self._observation(), {"success": False, "object": self.name}
+
+    def _load_priors(self) -> list:
+        """Frozen policies for every stage before this one, with their observation statistics."""
+        import pickle
+
+        import torch
+        from stable_baselines3 import PPO
+
+        torch.set_num_threads(1)
+        priors = []
+        for stage in STAGES[:STAGES.index(self.final_stage)]:
+            run = Path(self.handoff["runs"][stage])
+            weights, stats = run / f"ppo_{stage}_final.zip", run / "vecnormalize.pkl"
+            if not weights.exists() or not stats.exists():
+                # Loud on purpose. Quietly starting from home instead would train a policy for
+                # a situation the deployed pipeline never produces.
+                raise FileNotFoundError(
+                    f"hand-off for {self.final_stage!r} needs a finished {stage!r} in {run}")
+            with open(stats, "rb") as fh:
+                vn = pickle.load(fh)
+            priors.append((stage, PPO.load(weights, device="cpu").policy, vn.obs_rms.mean.copy(),
+                           np.sqrt(vn.obs_rms.var + vn.epsilon), float(vn.clip_obs)))
+        return priors
+
+    def _run_priors(self) -> bool:
+        """Play the frozen earlier stages, each until its own success test fires."""
+        self.handoff_steps = 0
+        for stage, policy, mean, std, clip in self._priors:
+            self._begin_stage(stage)
+            obs = self._observation()
+            for _ in range(int(self.handoff.get("max_steps", 150))):
+                action, _ = policy.predict(np.clip((obs - mean) / std, -clip, clip)[None],
+                                           deterministic=True)
+                obs, _, done, truncated, _ = self.step(action[0])
+                self.handoff_steps += 1
+                if self.prior_hook is not None:
+                    self.prior_hook(self)
+                if done or truncated:
+                    break
+            if not done:
+                return False
+        return True
+
+    def reset(self, *, seed: int | None = None, options: dict | None = None):
+        super().reset(seed=seed)
+        use_priors = bool(self.handoff.get("enabled", False)) and self.final_stage != STAGES[0]
+        if use_priors and self._priors is None:
+            self._priors = self._load_priors()
+        self.handoff_ok = True
+        for _ in range(1 + int(self.handoff.get("retries", 4)) if use_priors else 1):
+            self._reset_scene()
+            self.handoff_ok = self._run_priors() if use_priors else True
+            if self.handoff_ok:
+                break
+        self._begin_stage(self.final_stage)
+        return self._observation(), {"success": False, "object": self.name,
+                                     "handoff_ok": self.handoff_ok,
+                                     "handoff_steps": self.handoff_steps}
 
     def step(self, action: np.ndarray):
         raw = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)

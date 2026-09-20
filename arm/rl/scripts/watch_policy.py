@@ -108,6 +108,16 @@ def main() -> None:
             except SystemExit:
                 pass
 
+        def draw_prior(e):
+            # The frozen earlier stages run inside reset(); draw them too.
+            frame = cv2.cvtColor(e.scene.render(args.cam, args.res), cv2.COLOR_RGB2BGR)
+            label(frame, [(f"{e.stage} (frozen policy)  ->  hands off to {e.final_stage}"
+                           f"   target: {e.name}", (0, 200, 255))])
+            cv2.imshow(WINDOW, frame)
+            cv2.waitKey(1)
+            time.sleep(period)
+
+        inner.prior_hook = draw_prior
         obs = env.reset()
         name = inner.name
         episode += 1

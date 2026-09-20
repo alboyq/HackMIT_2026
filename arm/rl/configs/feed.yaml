@@ -13,6 +13,13 @@ env:
   reach_settle_s: 0.15
   settle_bonus: 0.25           # pays for slowing down once in tolerance     # 2 cm was tight for a 6-DoF arm under a velocity cap
 
+  # Each stage after reach STARTS from where the frozen earlier stages leave the arm.
+  handoff:
+    enabled: true
+    max_steps: 150             # per prior stage; reach takes 21-80
+    retries: 4                 # re-deal the scene if a prior stage fails, then give up loudly
+    runs: {reach: runs/feed-reach, grasp: runs/feed-grasp, lift: runs/feed-lift}
+
   # Control / safety envelope
   action_delta_rad: 0.02
   action_lowpass: 0.35

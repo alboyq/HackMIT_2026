@@ -246,6 +246,23 @@ def main() -> None:
                     model = PPO.load(ck, device="cpu")
             except SystemExit:
                 pass
+        def draw_prior(e):
+            # The frozen earlier stages run inside reset(); draw them so the viewer shows one
+            # continuous reach -> grasp motion rather than an arm that appears at the object.
+            global _frame
+            img = cv2.cvtColor(e.scene.render(args.cam, 480), cv2.COLOR_RGB2BGR)
+            for k, line in enumerate([f"{e.stage} (frozen policy)  ->  hands off to {e.final_stage}",
+                                      f"target {e.name}"]):
+                y = 22 + k * 22
+                cv2.putText(img, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)
+                cv2.putText(img, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 255), 1, cv2.LINE_AA)
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if ok:
+                with _frame_lock:
+                    _frame = buf.tobytes()
+            time.sleep(period)
+
+        inner.prior_hook = draw_prior
         obs = env.reset()
         episode += 1
         info = {}
