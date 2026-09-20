@@ -9,6 +9,44 @@ which is a *different and still-valid* route to the same demo).
 
 ---
 
+## 00. GRASP IS FINAL (2026-09-20 ~03:50 PDT) - supersedes everything below about grasp/lift
+
+**The grasp stage is a HYBRID, and it is frozen.** Pure RL never learned the lift (0% through 5.6M + 4M
+steps, including one collapse into hovering). What ships:
+
+1. `reach` - learned, frozen (`arm/rl/models/grasp_v1/ppo_reach_final.zip`). Arrives above the object's
+   top, within 15 deg of vertical, jaws squared to a box. 30/30.
+2. place + pinch - learned, frozen (`.../ppo_grasp_1935120_steps.zip`). Centres to ~3 mm, descends fully
+   open, seats the object deep between the claws, closes. Seated pinch in 84-88%.
+3. lift - SCRIPTED (`arm/rl/scripts/hybrid_pick.py`): damped-least-squares Cartesian, 2 mm/step straight
+   up, wrist rotation held, sideways error of the OBJECT servoed at gain 0.15 (0.3 -> 17%, 0.6 -> 2%: higher
+   gains oscillate against the env action low-pass), then hold.
+4. `shield()` wraps EVERY action: within 6 cm of head/torso and closing => arm frozen.
+
+**Measured (env's own test: seated pinch, lifted 10 cm, <= 3 cm sideways, held still 0.7 s), 50 episodes
+each:** 78% / 78% / 80% at wrist FOV 100 / 130 / 150 deg. Full-size 31/36, small (<40 mm) 8/14.
+Head/torso contacts: 0. The RL run's own final checkpoint scores 58% in the same harness - do not swap it in.
+
+Run it:  `python arm/rl/scripts/hybrid_pick.py arm/rl/models/grasp_v1 50`
+Watch it: `python arm/rl/scripts/watch_hybrid.py arm/rl/models/grasp_v1`  (GX10 monitor)
+
+**FOV does not matter to any policy** - nothing consumes pixels; FOV only gates when a target counts as
+seen. Lens choice is about measurement quality on the real arm. The lens photographed on 09-20 shows heavy
+barrel distortion (bowed ceiling beams); its FOV was not measured. `arm/rl/scripts/cam_view.py` shows the
+real camera with a straight reference grid. Any lens needs a checkerboard calibration before the feed's
+face-size stop can be trusted.
+
+**Sim changes that made this work (all in arm/ik/scene.py, all measured):** claws centred on the wrist
+axis (stock model: 44 mm off), pad rows down the whole gripping face, plates 12 -> 28 mm wide (real paddle
+tapers 5 cm -> 12 mm; spheres were squeezed out sideways off the narrow strip), rubber-pad friction 1.5,
+NOSE NOW COLLIDES (it had contype=0 and the arm passed through the face unreported).
+
+**Known limits:** small objects are the weak spot; the `user_hand` slab on the table (an IK-track
+placeholder) still gets brushed ~1/50; physics_substeps, reward tables etc. below are only relevant if
+someone resumes RL. NEXT: feeding, `arm/rl/scripts/hybrid_feed.py` - see its docstring and commit 5216006.
+
+---
+
 ## 0. UPDATE 2026-09-19 21:10 PDT — read this first; it supersedes §3 and §4
 
 **Training is PAUSED on purpose** (the team was physically moving the setup). Grasp is saved at
