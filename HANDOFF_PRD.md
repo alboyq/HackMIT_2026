@@ -46,7 +46,49 @@ C:\Users\User\Downloads\IITB\
   HANDOFF_PRD.md              this file
 ```
 
-## 3. Running the system
+## 3. First-time setup (for new users)
+
+### Prerequisites:
+- Python 3.12+
+- Node.js 18+
+- NVIDIA GPU with CUDA 12.6+ (for gaze3d and SAM)
+- ~5 GB disk space for model weights
+
+### One-time setup:
+
+```bash
+# 1. Backend
+cd flicker_dashboard/backend
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+
+# 2. Frontend
+cd ../frontend
+npm install
+
+# 3. Gaze3d (downloads ~2.7 GB of model weights)
+cd ../../gaze3d
+./setup.sh              # Linux/Mac
+# OR manually on Windows:
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+# Models auto-download on first run
+
+# 4. SAM segmentation (optional, for object detection)
+cd ../sam_segmentation
+# See setup.md - requires HuggingFace access to facebook/sam3
+```
+
+### API Keys (optional, for cloud AI):
+Create `flicker_dashboard/backend/.env`:
+```
+GEMINI_API_KEY=your_key    # https://aistudio.google.com/app/apikey
+ELEVENLABS_API_KEY=your_key # https://elevenlabs.io/app/settings/api-keys
+```
+
+## 4. Running the system
 
 ### Start all services (Windows):
 ```powershell
