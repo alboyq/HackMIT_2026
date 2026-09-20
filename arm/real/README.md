@@ -85,6 +85,9 @@ what that README lists as not done:
 **Blocking gap: the gripper (motor 0x08) open/closed readings were never measured, so grip targets are refused.**
 Also unresolved and inherited: no watchdog (TIMEOUT=0 — do not change the register), the driver's `atexit` disables
 motors so a faulted process must be kept alive, the gravity model is ~1.7× off at the extended elbow.
+`fit_gravity.py` (offline, on `arm_replay/logs`) shows that error is **not a missing mass** - the shoulder would see it
+too and does not - so it is local to the elbow (most likely that motor's torque scale). One more held pose on the arm,
+elbow well off its stop, decides whether a single J3 factor of ~1.65 is the whole fix.
 
 ## Order of work to go live (none of it done here)
 

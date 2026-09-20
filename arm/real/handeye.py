@@ -5,10 +5,10 @@ NOMINAL: the mount the sim uses (arm/ik/scene.py: 6.5 cm off the claw axis, 6 cm
 ~33 deg). Good to a couple of cm if the real bracket matches; the perception-noise model the policies were
 trained with (12 mm bias, scaled by range) was chosen to absorb roughly that.
 
-REFINED: cv2.calibrateHandEye from N poses. IMPORTANT - this needs NO powered motion: with the motors
+REFINED: hand-eye (Park-Martin, park_martin() below) from N poses. IMPORTANT - this needs NO powered motion: with the motors
 DISABLED (zero torque, as in the joint-map session of commit 2ee81bf) a person moves the arm by hand to ~15
 poses that all see a fixed checkerboard; at each pose record the six joint angles and one image.
-    python handeye.py solve samples.json      # samples: [{"q": [6 joint angles, MODEL convention], "image": "x.jpg"}]
+    ../../.venv-vision/bin/python handeye.py solve samples.json      # samples: [{"q": [6 joint angles, MODEL convention], "image": "x.jpg"}]
 """
 import json
 import sys
@@ -34,6 +34,43 @@ def load():
     return NOMINAL_T_TOOL_CAM.copy(), False
 
 
+def _log(R):
+    a = np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0))
+    w = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    return w * (0.5 if a < 1e-9 else a / (2.0 * np.sin(a)))
+
+
+def park_martin(Rg, tg, Rt, tt):
+    """Hand-eye AX = XB (Park & Martin 1994), in numpy: this OpenCV 5 build ships without calibrateHandEye.
+    Rg, tg: tool in base per pose. Rt, tt: target in camera per pose. Returns X = T_tool_cam."""
+    Tg = [np.block([[R, np.reshape(t, (3, 1))], [np.zeros((1, 3)), 1.0]]) for R, t in zip(Rg, tg)]
+    Tc = [np.block([[R, np.reshape(t, (3, 1))], [np.zeros((1, 3)), 1.0]]) for R, t in zip(Rt, tt)]
+    AB = [(np.linalg.inv(Tg[j]) @ Tg[i], Tc[j] @ np.linalg.inv(Tc[i])) for i in range(len(Tg)) for j in range(i + 1, len(Tg))]
+    M = sum(np.outer(_log(B[:3, :3]), _log(A[:3, :3])) for A, B in AB)
+    w, V = np.linalg.eigh(M.T @ M)
+    R = V @ np.diag(w ** -0.5) @ V.T @ M.T
+    C = np.vstack([A[:3, :3] - np.eye(3) for A, _ in AB])
+    d = np.concatenate([R @ B[:3, 3] - A[:3, 3] for A, B in AB])
+    X = np.eye(4); X[:3, :3] = R; X[:3, 3] = np.linalg.lstsq(C, d, rcond=None)[0]
+    return X
+
+
+def selftest():
+    """Synthetic poses with a known camera mount -> the solver must recover it."""
+    rng = np.random.default_rng(0)
+    X = NOMINAL_T_TOOL_CAM.copy(); X[:3, 3] += [0.01, -0.005, 0.008]
+    target = np.eye(4); target[:3, 3] = [0.4, 0.0, 0.0]
+    Rg, tg, Rt, tt = [], [], [], []
+    for _ in range(15):
+        Tb = np.eye(4); Tb[:3, :3] = cv2.Rodrigues(rng.normal(0, 0.5, 3))[0]; Tb[:3, 3] = rng.normal([0.3, 0, 0.3], 0.05)
+        Tc = np.linalg.inv(Tb @ X) @ target
+        Rg.append(Tb[:3, :3]); tg.append(Tb[:3, 3]); Rt.append(Tc[:3, :3]); tt.append(Tc[:3, 3] + rng.normal(0, 0.0005, 3))
+    got = park_martin(Rg, tg, Rt, tt)
+    e_t = np.linalg.norm(got[:3, 3] - X[:3, 3]); e_r = np.degrees(np.linalg.norm(_log(got[:3, :3].T @ X[:3, :3])))
+    print(f"hand-eye self-test: translation error {1000*e_t:.2f} mm, rotation error {e_r:.3f} deg ->", "PASS" if e_t < 0.003 and e_r < 0.5 else "FAIL")
+    return e_t < 0.003 and e_r < 0.5
+
+
 def solve(samples_path, fk, cam_K, cam_D, pattern=(9, 6), square_m=0.025):
     """fk(q) -> 4x4 pose of the tool (link_6) in the robot base, from the MuJoCo model (arm.ik)."""
     objp = np.zeros((pattern[0] * pattern[1], 1, 3), np.float64)
@@ -52,8 +89,7 @@ def solve(samples_path, fk, cam_K, cam_D, pattern=(9, 6), square_m=0.025):
         Rg.append(T[:3, :3]); tg.append(T[:3, 3]); Rt.append(cv2.Rodrigues(rvec)[0]); tt.append(tvec.ravel())
     if len(Rg) < 8:
         raise SystemExit(f"only {len(Rg)} usable poses; need >= 8, spread over rotations about all three axes")
-    R, t = cv2.calibrateHandEye(Rg, tg, Rt, tt, method=cv2.CALIB_HAND_EYE_PARK)
-    T = np.eye(4); T[:3, :3] = R; T[:3, 3] = t.ravel()
+    T = park_martin(Rg, tg, Rt, tt)
     d = np.linalg.norm(T[:3, 3] - NOMINAL_T_TOOL_CAM[:3, 3])
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps({"T_tool_cam": T.tolist(), "poses": len(Rg), "shift_from_nominal_m": float(d)}, indent=2))
@@ -65,5 +101,24 @@ if __name__ == "__main__":
     T, refined = load()
     print("T_tool_cam:", "REFINED" if refined else "NOMINAL (sim mount)")
     print(np.round(T, 3))
+    if len(sys.argv) > 1 and sys.argv[1] == "selftest":
+        raise SystemExit(0 if selftest() else 1)
     if len(sys.argv) > 2 and sys.argv[1] == "solve":
-        print("solve() needs fk and the lens calibration: call it from a session that has arm.ik loaded")
+        calib = Path(__file__).resolve().parent / "calibration" / "wrist_camera.json"
+        if not calib.exists():
+            raise SystemExit("calibrate the lens first (calibrate_camera.py): hand-eye on an uncalibrated fisheye is meaningless")
+        import os
+        import mujoco                                        # .venv-vision has both mujoco and cv2
+        c = json.loads(calib.read_text())
+        root = Path(os.environ.get("YAM_MENAGERIE", Path(__file__).resolve().parents[2] / "third_party" / "mujoco_menagerie"))
+        xml = next(p for p in (root / "yam.xml", root / "i2rt_yam" / "yam.xml") if p.exists())
+        M = mujoco.MjModel.from_xml_path(str(xml)); D = mujoco.MjData(M)
+        tool = mujoco.mj_name2id(M, mujoco.mjtObj.mjOBJ_BODY, "link_6")
+
+        def fk(q):
+            D.qpos[:] = 0.0; D.qpos[:6] = q
+            mujoco.mj_kinematics(M, D)
+            T = np.eye(4); T[:3, :3] = D.xmat[tool].reshape(3, 3); T[:3, 3] = D.xpos[tool]
+            return T
+
+        solve(sys.argv[2], fk, np.array(c["K"]), np.array(c["D"]))
