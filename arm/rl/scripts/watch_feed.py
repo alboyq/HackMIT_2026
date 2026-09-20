@@ -36,11 +36,16 @@ def frame(e, lines, banner=None):
     cam.distance, cam.azimuth, cam.elevation = 1.30, 100.0, -12.0
     state["renderer"].update_scene(e.data, camera=cam)
     img = cv2.cvtColor(state["renderer"].render(), cv2.COLOR_RGB2BGR)
+    # The lens is 150 deg, but MuJoCo can only draw it as a pinhole, which squashes the middle until the
+    # face is a dot. Show the CENTRE of the wrist view (75 deg) instead - the same camera, cropped.
+    full_fov = float(e.model.cam_fovy[e.wrist_cam])
+    e.model.cam_fovy[e.wrist_cam] = 75.0
     wrist = cv2.cvtColor(e.scene.render("wrist_cam", 320), cv2.COLOR_RGB2BGR)
+    e.model.cam_fovy[e.wrist_cam] = full_fov
     wrist = cv2.resize(wrist, (216, 216))
     cv2.rectangle(wrist, (0, 0), (215, 215), (0, 255, 255), 2)
     img[176:392, 416:632] = wrist            # bottom-right: the head lives top-right
-    cv2.putText(img, "wrist camera", (420, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, "wrist camera (centre 75 deg)", (420, 170), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
     for k, (text, colour) in enumerate(lines):
         put(img, text, 24 + 22 * k, colour)
     if banner:
