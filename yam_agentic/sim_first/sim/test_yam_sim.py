@@ -38,11 +38,13 @@ def test_scene_loads(scene):
 
 def test_tool_frame_is_between_the_pads(scene):
     tf = ToolFrame(scene.model)
-    # the TCP is NOT grasp_site: on this model it sits ~4.4 cm off it
-    assert np.linalg.norm(tf.tcp_local) > 0.03
+    # Where the TCP sits relative to grasp_site is gripper-specific: on the menagerie crank model
+    # grasp_site is 4.4 cm away from the pads, while i2rt's linear_4310 authors grasp_site AS the
+    # tool centre. Either way ToolFrame must measure it, not assume it.
+    assert np.linalg.norm(tf.tcp_local) < 0.08
     assert abs(float(np.dot(tf.tool_local, tf.jaw_local))) < 1e-9
-    assert 0.070 < tf.max_width < 0.095             # pads open to ~83 mm
-    assert tf.opening["closed"] < 0.005
+    assert 0.070 < tf.max_width < 0.100             # linear_4310: 95 mm throw (crank: 83 mm)
+    assert tf.opening["closed"] < 0.02
 
 
 def test_ik_round_trip(scene):

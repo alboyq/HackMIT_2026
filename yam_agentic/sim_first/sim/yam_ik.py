@@ -24,6 +24,37 @@ def _unit(v):
     return np.asarray(v, float) / n
 
 
+
+def _geom_points(model, data, gid, max_pts=400):
+    """World-space sample of a geom's surface: mesh vertices if it has them, else its centre."""
+    if model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_MESH:
+        mid = model.geom_dataid[gid]
+        a, n = model.mesh_vertadr[mid], model.mesh_vertnum[mid]
+        v = model.mesh_vert[a:a + n].reshape(-1, 3)
+        if n > max_pts:
+            v = v[:: max(1, n // max_pts)]
+        R = data.geom_xmat[gid].reshape(3, 3)
+        return data.geom_xpos[gid] + v @ R.T
+    return data.geom_xpos[gid][None, :]
+
+
+def _jaw_gap_centre(model, data, gl, gr, axis_t, P0, jaw_w):
+    """Tool centre point, by symmetry.
+
+    Both jaws are mirror images about the plane through the arm's axis, so the TCP must lie on
+    that axis; only its distance along the axis is in question. Take each jaw's vertices that sit
+    nearest the mirror plane — those are the gripping faces — and average their projection onto
+    the axis. Symmetric by construction, so it cannot drift sideways the way a nearest-point or
+    convex-hull search does on an asymmetric bracket.
+    """
+    s_vals = []
+    for gs_ in (gl, gr):
+        V = np.vstack([_geom_points(model, data, g, max_pts=800) for g in gs_])
+        w = np.abs((V - P0) @ jaw_w)
+        inner = V[w <= np.quantile(w, 0.25)]                # the face, not the outer bracket
+        s_vals.append(((inner - P0) @ axis_t).mean())
+    return P0 + float(np.mean(s_vals)) * axis_t
+
 class ToolFrame:
     """Measured geometry of the gripper.
 
@@ -45,34 +76,69 @@ class ToolFrame:
         rj = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "right_finger")
         self._qadr_l = model.jnt_qposadr[self._jid]
         self._qadr_r = model.jnt_qposadr[rj]
-        lb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, left)
-        rb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, right)
-        # the pads: the small spheres that actually touch the object
-        self._pad_l = [g for g in range(model.ngeom) if model.geom_bodyid[g] == lb
+        self._same_sign = True                                  # provisional; resolved below by measurement
+        self._lb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, left)
+        self._rb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, right)
+        if self._lb < 0 or self._rb < 0:                       # linear_4310 graft: tips are the finger bodies
+            self._lb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "link_left_finger")
+            self._rb = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "link_right_finger")
+        if self._lb < 0 or self._rb < 0:
+            raise RuntimeError("cannot find the two finger bodies")
+        # Pads: the small contact spheres if this gripper has them (crank / menagerie), else the
+        # finger geoms themselves (linear_4310's tip meshes).
+        self._pad_l = [g for g in range(model.ngeom) if model.geom_bodyid[g] == self._lb
                        and model.geom_type[g] == mujoco.mjtGeom.mjGEOM_SPHERE]
-        self._pad_r = [g for g in range(model.ngeom) if model.geom_bodyid[g] == rb
+        self._pad_r = [g for g in range(model.ngeom) if model.geom_bodyid[g] == self._rb
                        and model.geom_type[g] == mujoco.mjtGeom.mjGEOM_SPHERE]
+        self._sphere_pads = bool(self._pad_l and self._pad_r)
+        if not self._sphere_pads:
+            self._pad_l = [g for g in range(model.ngeom) if model.geom_bodyid[g] == self._lb
+                           and model.geom_contype[g]]
+            self._pad_r = [g for g in range(model.ngeom) if model.geom_bodyid[g] == self._rb
+                           and model.geom_contype[g]]
         if not self._pad_l or not self._pad_r:
-            raise RuntimeError("no pad spheres found on the fingers")
+            raise RuntimeError("the finger bodies carry no collision geometry")
 
         d = mujoco.MjData(model)
-        pl, pr = self._pads(d, 0.5 * float(self.grip_range[1]))
-        tcp = 0.5 * (pl + pr)
+        # How the second finger mirrors the first differs by gripper (crank uses opposite signs,
+        # linear_4310 the same), so settle it by measuring which choice actually opens the jaws.
+        lo, hi = float(self.grip_range[0]), float(self.grip_range[1])
+        best = None
+        for sign in (True, False):
+            self._same_sign = sign
+            pl0, pr0 = self._bodies(d, lo)
+            pl1, pr1 = self._bodies(d, hi)
+            rel = (pr1 - pl1) - (pr0 - pl0)
+            if best is None or np.linalg.norm(rel) > np.linalg.norm(best[1]):
+                best = (sign, rel)
+        self._same_sign, rel = best
+        self.max_width = float(np.linalg.norm(rel))            # true throw, measured
+        self.model_set(d, 0.5 * hi)
         R = d.site_xmat[self.site_id].reshape(3, 3)
         p = d.site_xpos[self.site_id]
-        self.tcp_local = R.T @ (tcp - p)                     # TCP as an offset from grasp_site
+        if self._sphere_pads:                                   # crank: the pad spheres ARE the contact patch
+            a_, b_ = self._pads(d, 0.5 * hi)
+            tcp = 0.5 * (a_ + b_)
+        else:                                                   # linear_4310: i2rt authors grasp_site as the TCP
+            tcp = p.copy()
         self.tool_local = _unit(R.T @ (tcp - d.xpos[self.body_id]))
-        self.jaw_local = _unit(R.T @ (pr - pl))
+        self.tcp_local = R.T @ (tcp - p)
+        self.jaw_local = _unit(R.T @ rel)
         self.jaw_local = _unit(self.jaw_local - self.tool_local * (self.jaw_local @ self.tool_local))
-        self.opening = {tag: float(np.linalg.norm(np.subtract(*reversed(self._pads(d, c)))))
-                        for tag, c in (("closed", self.grip_range[0]), ("open", self.grip_range[1]))}
-        self.max_width = self.opening["open"]
+        self.opening = {"closed": 0.0, "open": self.max_width}
 
-    def _pads(self, d, ctrl):
+    def _bodies(self, d, ctrl):
+        self.model_set(d, ctrl)
+        return d.xpos[self._lb].copy(), d.xpos[self._rb].copy()
+
+    def model_set(self, d, ctrl):
         d.qpos[:] = self.model.qpos0
         d.qpos[self._qadr_l] = ctrl
-        d.qpos[self._qadr_r] = -ctrl                         # the mimic equality, applied by hand
+        d.qpos[self._qadr_r] = ctrl if self._same_sign else -ctrl
         mujoco.mj_forward(self.model, d)
+
+    def _pads(self, d, ctrl):
+        self.model_set(d, ctrl)
         return (d.geom_xpos[self._pad_l].mean(axis=0).copy(),
                 d.geom_xpos[self._pad_r].mean(axis=0).copy())
 

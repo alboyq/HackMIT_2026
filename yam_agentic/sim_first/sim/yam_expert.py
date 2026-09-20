@@ -48,7 +48,11 @@ SLOW = float(os.environ.get("YAM_SLOW", "0.30"))           # rad/s on Cartesian 
 CARRY = float(os.environ.get("YAM_CARRY", "0.6"))           # rad/s while carrying: the 0.3 limit is about
                                                            # descent ACCURACY; a held payload tolerates more
 STAGING = float(os.environ.get("YAM_STAGING", "0.15"))     # m short of the mouth
-FINGER_REACH = float(os.environ.get("YAM_FINGER_REACH", "0.050"))   # m of finger below the gripper housing
+FINGER_REACH = float(os.environ.get("YAM_FINGER_REACH", "0.062"))   # m of finger below the gripper housing
+# On linear_4310 the TCP (grasp_site) is the midpoint of the fingertips' DISTAL facets, so putting
+# it at the object's centre pinches with the very tips and the object slips. Push the TCP this far
+# further along the tool axis, which seats the object in the middle of the pad faces instead.
+GRASP_DEPTH = float(os.environ.get("YAM_GRASP_DEPTH", "0.0"))
 CART_STEP = 0.008                                          # m between IK'd Cartesian samples
 DWELL = float(os.environ.get("YAM_DWELL", "0.25"))         # s at ordinary waypoints
 PRE_DWELL = float(os.environ.get("YAM_PRE_DWELL", "0.6"))  # s at the pre-grasp: the descent is
@@ -175,6 +179,8 @@ class Expert:
             tcp = np.array([p[0], p[1], z])
         else:
             tcp = np.array([p[0], p[1], max(0.025, o.rest_z * 0.9)])
+        tcp = tcp + tool_dir * GRASP_DEPTH                     # seat the object mid-pad, not at the tips
+        tcp[2] = max(tcp[2], 0.012)                            # ...but keep the fingertips off the table
         jaw_dir = None
         if o.kind == "box":
             # square-on to a face; solve_best tries both signs, and 90 deg round is equivalent

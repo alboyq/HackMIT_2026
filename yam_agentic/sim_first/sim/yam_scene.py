@@ -36,6 +36,7 @@ YAM_CAM_RES, YAM_WRIST_FOVY, YAM_SCENE_FOVY.
 """
 import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -61,7 +62,13 @@ def _find_menagerie() -> Path:
 
 
 YAMDIR = _find_menagerie()
-ARM_XML = YAMDIR / "yam.xml"
+# Which gripper the arm carries. "linear_4310" is what is on the bench: rack-and-pinion sliding
+# jaws on a DM4310, 95 mm throw, matching I2RT's published spec. The stock menagerie yam.xml
+# carries crank_4310 instead (79 mm) — see rl/yam/make_arm_linear4310.py. YAM_ARM=stock reverts.
+_VARIANT = os.environ.get("YAM_ARM", "stock")   # "linear_4310" = correct gripper, grasping WIP (see make_arm_linear4310.py)
+ARM_XML = YAMDIR / ("yam.xml" if _VARIANT == "stock" else f"_yam_{_VARIANT.replace('_', '')}.xml")
+if not ARM_XML.exists() and _VARIANT != "stock":
+    raise RuntimeError(f"{ARM_XML} missing - run: python rl/yam/make_arm_linear4310.py")
 
 CAM_RES = int(os.environ.get("YAM_CAM_RES", "256"))
 WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "125"))   # wide pinhole source for the fisheye warp
@@ -171,8 +178,12 @@ def _patched_arm() -> Path:
     # apple slides out of the jaws during a gentle lift. That is a placeholder value, not a
     # spec: the real YAM is rated for a 2 kg payload, which needs ~20 N of grip at mu ~ 1.
     # kp=800 gives ~23 N at the joint and ~10 N per pad through the finger linkage.
-    src = src.replace('<position ctrlrange="0.0 0.041" kp="100" kv="10" inheritrange="0"/>',
-                      f'<position ctrlrange="0.0 0.041" kp="{GRIP_KP:g}" kv="{GRIP_KV:g}" inheritrange="0"/>')
+    # regex, not an exact string: the ctrlrange differs between gripper variants (0.041 crank,
+    # 0.0475 linear_4310) and an exact-match replace silently left kp at 100 = ~1.2 N of grip.
+    src, n = re.subn(r'(<position ctrlrange="[^"]*")\s+kp="[\d.]+"\s+kv="[\d.]+"',
+                     rf'\1 kp="{GRIP_KP:g}" kv="{GRIP_KV:g}"', src)
+    if n != 1:
+        raise RuntimeError(f"expected exactly one finger <position> to re-gain, patched {n}")
     k0 = src.find("<keyframe>")
     if k0 != -1:
         k1 = src.index("</keyframe>") + len("</keyframe>")

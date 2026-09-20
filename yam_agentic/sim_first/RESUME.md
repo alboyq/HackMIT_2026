@@ -62,7 +62,12 @@ needs no recalibration of the *sim*. What does need redoing:
 3. Nothing else. No marker board, no intrinsics, no camera-to-robot transform: the policy takes
    2D prompts only.
 
-## Current state (19 Sep, late)
+## Current state
+
+**Read [NEXT_AGENT.md](NEXT_AGENT.md) first** — it has the open bug, what is ruled out, and the
+order to work in.
+
+### As of 19 Sep, late
 
 - GX10 `runs/yam_g1`: 2,104 demos / 197k frames, ACT training, ~253 samples/s, evals every 2000
   steps against held-out backgrounds. This dataset predates the wrist-camera remount and the
