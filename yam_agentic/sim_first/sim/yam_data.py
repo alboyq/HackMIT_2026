@@ -47,8 +47,12 @@ CAM_POS = np.array([float(v) for v in os.environ.get("YAM_CAM_POS", "-0.02 0.35 
 CAM_TGT = np.array([float(v) for v in os.environ.get("YAM_CAM_TGT", "0.38 0.0 0.11").split()])
 CAM_JIT = np.array([float(v) for v in os.environ.get("YAM_CAM_JIT", "0.06 0.06 0.05").split()])
 CAM_FOVY = tuple(float(v) for v in os.environ.get("YAM_CAM_FOVY", "58 66").split())
+# Which objects may be the TARGET. The others still appear as distractors, so the 2D prompt
+# stays meaningful; this only narrows the range of grasp geometries the policy must produce.
+TARGETS = [t for t in os.environ.get("YAM_TARGETS", "").split(",") if t] or None
 
 KEEP_TABLE = os.environ.get("YAM_TABLE", "1") == "1"   # render the real table instead of a background photo
+ERASE_AUG = os.environ.get("YAM_ERASE", "0") == "1"  # Cutout-style patches; off by default (see below)
 BLUR_AUG = os.environ.get("YAM_BLUR", "0") == "1"      # HQ camera: no defocus/motion blur by default
 AUG_PROFILE = os.environ.get("YAM_AUG_PROFILE", "heavy")       # "heavy" = yam_v1; "real" for everything after
 GREY = 127
@@ -139,7 +143,15 @@ class DataScene(YamScene):
         # --- objects: which, where, how big, what colour
         n_present = int(rng.integers(2, 5))
         present = list(rng.choice(self.names, size=n_present, replace=False))
-        self.target = str(rng.choice(present))
+        if TARGETS:
+            elig = [n for n in present if n in TARGETS]
+            if not elig:                                    # guarantee a legal target is on the table
+                elig = [str(rng.choice(TARGETS))]
+                present[0] = elig[0]
+                present = list(dict.fromkeys(present))
+            self.target = str(rng.choice(elig))
+        else:
+            self.target = str(rng.choice(present))
         mujoco.mj_resetDataKeyframe(m, d, 0)
         placed, specs = [], []
         for n in self.names:
@@ -264,7 +276,11 @@ class DataScene(YamScene):
         if rng.random() < 0.2: ops["vignette"] = rng.uniform(0.1, 0.35)
         if rng.random() < 0.6: ops["jpeg"] = rng.uniform(45, 95)
         ops["_wb"] = rng.uniform(0.88, 1.14, 3)
-        ops["_erase"] = 1 if rng.random() < 0.15 else 0
+        # Random erasing buys occlusion robustness by DEGRADING training-set fit. Fit is the
+        # binding constraint here (open-loop error ~= the signal), and a solid patch that
+        # teleports every frame models no real occluder — the arm already occludes the object
+        # in the wrist view, coherently and for free. YAM_ERASE=1 restores it.
+        ops["_erase"] = (1 if rng.random() < 0.15 else 0) if ERASE_AUG else 0
         return ops
 
     def project(self, P):
