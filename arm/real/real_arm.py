@@ -93,6 +93,10 @@ class RealArm(ArmInterface):
         hold sequence from replay_pose2.py). From here on no live motor is ever read again."""
         self._seed = np.asarray(seed_raw, float).copy()
         self._sp = self._seed.copy()
+        # The arm rests ON its hard stops when unpowered, i.e. outside the safety margin. Clipping it into the
+        # window would make joints lift off their stops unasked on the first command. A joint that starts beyond
+        # the margin may stay there; it just may not go any further out.
+        self.raw_lo, self.raw_hi = np.minimum(self.raw_lo, self._seed), np.maximum(self.raw_hi, self._seed)
         self._t0, self.mode = time.time(), "run"
 
     def _gscale(self):
@@ -250,6 +254,8 @@ def selftest() -> int:
     check("gravity feed-forward rides in every command once ramped in", all(abs(c[4] - 1.4 * 6.5) < 1e-6 for c in ms[2].sent[-8:]),
           f"J3 tff {ms[2].sent[-1][4]:.2f} N.m (first tick {ms[2].sent[0][4]:.2f}: it ramps in, as on the arm)")
     check("no live motor is ever read after begin()", sum(m.reads for m in ms) == 0)
+    check("joints resting on their stops are NOT moved by the first command", abs(arm._sp[2] - seed[2]) < 1e-12 and abs(arm._sp[0] - seed[0]) < 1e-12,
+          f"J3 commanded {arm._sp[2]:.4f}, enabled at {seed[2]:.4f}")
 
     arm, ms = fresh()
     far = arm.to_model(arm.raw_hi + 1.0)

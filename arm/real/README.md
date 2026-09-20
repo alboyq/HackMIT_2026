@@ -81,7 +81,7 @@ what that README lists as not done:
 * `connect()` needs `YAM_REAL_ARM=I_AM_AT_THE_ARM_WITH_THE_ESTOP` **and** a typed confirmation at a terminal, and
   is deliberately left unwired: the first powered run of new code is a person's job.
 
-`python arm/real/real_arm.py --selftest` (fake motors, no CAN): 16 checks, all pass.
+`python arm/real/real_arm.py --selftest` (fake motors, no CAN): 17 checks, all pass.
 **Blocking gap: the gripper (motor 0x08) open/closed readings were never measured, so grip targets are refused.**
 Also unresolved and inherited: no watchdog (TIMEOUT=0 — do not change the register), the driver's `atexit` disables
 motors so a faulted process must be kept alive, the gravity model is ~1.7× off at the extended elbow.
