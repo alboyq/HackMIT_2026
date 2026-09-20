@@ -1,0 +1,10 @@
+{
+  "contact_size_deg_median": 50.855385729342196,
+  "contact_size_deg_min": 44.05764301288179,
+  "contact_size_deg_p10": 49.20357609341897,
+  "contact_size_deg_max": 55.52441064933622,
+  "n_touches": 28,
+  "pct_of_image_width_150deg_fisheye": 38.89919925710727,
+  "assumed_face_width_m": 0.145,
+  "note": "angular face width when the food first touched the face; sim, contact detection on, head size +-8%"
+}

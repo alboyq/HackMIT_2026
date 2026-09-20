@@ -45,6 +45,9 @@ from arm.ik.solver import ToolFrame
 ARM_JOINTS = tuple(f"joint{i}" for i in range(1, 7))
 OBJECTS = ("apple", "mug", "block")   # the marker is too thin for these pads
 STAGES = ("reach", "grasp", "lift", "present")
+# Monk Skin Tone scale, all ten steps, as RGBA.
+SKIN_TONES = tuple(tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)) + (1.0,) for h in (
+    "f6ede4", "f3e7db", "f7ead0", "eadaba", "d7bd96", "a07e56", "825c43", "604134", "3a312a", "292420"))
 
 
 class OpenYAMFeedEnv(gym.Env):
@@ -99,6 +102,25 @@ class OpenYAMFeedEnv(gym.Env):
         self.user_geoms = {i for i in range(self.model.ngeom)
                            if int(self.model.geom_bodyid[i]) in user_bodies}
         self.object_geoms = set(self.obj_gid.values())
+        # `user_hand` is a flat slab on the table left over from the IK track's hand-over target. The
+        # patient in this project is a head and a torso; the slab got clipped at 0.23 m/s during the
+        # feed's pull-back and was being counted as touching the person. Off unless asked for.
+        if not bool(self.ecfg.get("patient_hand_slab", False)):
+            hg = self.model.geom("hand").id
+            self.model.geom_contype[hg] = self.model.geom_conaffinity[hg] = 0
+            self.model.geom_rgba[hg] = [0, 0, 0, 0]
+            self.user_geoms.discard(hg)
+            self.hidden_hand = hg
+        # The person: size and skin tone are re-drawn every episode (see _reset_scene).
+        hb = self.model.body("user_head").id
+        self.head_gids = [g for g in range(self.model.ngeom) if int(self.model.geom_bodyid[g]) == hb]
+        self.skin_gids = [self.model.geom(n).id for n in ("head", "nose", "chin", "ear_l", "ear_r", "hand")]
+        self.head_sids = [self.model.site(n).id for n in ("mouth", "face")]
+        self.base_head = ([self.model.geom_size[g].copy() for g in self.head_gids],
+                          [self.model.geom_pos[g].copy() for g in self.head_gids],
+                          [self.model.site_pos[i].copy() for i in self.head_sids])
+        self.model.geom_matid[self.skin_gids] = -1          # so geom_rgba is what gets drawn
+        self.head_scale = 1.0
         # Elbow and forearm: the parts that swing past the person's head on the way to an object.
         # The hand itself is handled by the pad wall, because feeding must bring it near the mouth.
         self.swing_bodies = [self.model.body(n).id for n in ("link_2", "link_3", "link_4", "link_5")]
@@ -137,6 +159,15 @@ class OpenYAMFeedEnv(gym.Env):
         self.dt = 1.0 / float(self.ecfg["control_hz"])
         self.n_substeps = int(self.ecfg["physics_substeps"])
         self.model.opt.timestep = self.dt / self.n_substeps
+        # Held objects CREPT out of the claws: traced at a steady ~0.1 mm/step across the plate under a
+        # constant 8 N grip until they passed the edge (21% of feeds dropped, mostly apples, mostly once
+        # the claws were level and gravity loaded the contact sideways). That is MuJoCo's soft friction,
+        # not physics: 8 N x mu 1.5 x 2 plates holds 24 N against a 0.85 N apple. Elliptic cone, a
+        # stiffer friction-to-normal ratio and the no-slip pass remove the drift.
+        if bool(self.ecfg.get("noslip_contacts", True)):
+            self.model.opt.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+            self.model.opt.impratio = float(self.ecfg.get("impratio", 10.0))
+            self.model.opt.noslip_iterations = int(self.ecfg.get("noslip_iterations", 4))
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(7,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(33,), dtype=np.float32)
@@ -282,6 +313,20 @@ class OpenYAMFeedEnv(gym.Env):
     # ------------------------------------------------------------------ episode
     def _reset_scene(self) -> None:
         self.scene.reset()
+        # A different person every episode: head size +-8% (adult head breadth has an SD of ~4%), and
+        # one of the ten Monk-scale skin tones. No policy sees pixels, but the face detector on the
+        # real arm will, and anything rendered from this sim should not teach it one kind of face.
+        self.head_scale = float(self.np_random.uniform(*self.ecfg.get("head_scale_range", [1.0, 1.0])))
+        sizes, poss, sites = self.base_head
+        for g, sz, ps in zip(self.head_gids, sizes, poss):
+            self.model.geom_size[g] = sz * self.head_scale
+            self.model.geom_pos[g] = ps * self.head_scale
+        for i, ps in zip(self.head_sids, sites):
+            self.model.site_pos[i] = ps * self.head_scale
+        tone = SKIN_TONES[int(self.np_random.integers(len(SKIN_TONES)))]
+        for g in self.skin_gids:
+            if g != getattr(self, "hidden_hand", -1):
+                self.model.geom_rgba[g] = tone
 
         self.name = OBJECTS[int(self.np_random.integers(len(OBJECTS)))]
         self.onehot = np.eye(len(OBJECTS))[OBJECTS.index(self.name)]

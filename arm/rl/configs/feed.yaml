@@ -4,6 +4,9 @@ project:
 env:
   stage: reach
   control_hz: 30
+  noslip_contacts: true        # stop held objects creeping out of the grip (soft-friction artefact)
+  impratio: 10.0
+  noslip_iterations: 4
   physics_substeps: 8          # measured: 4 -> 8 costs 5% (829 -> 788 steps/s, python dominates),
                                # halves contact-force spikes (14.1 N -> 7.7 N against a 12 N
                                # crush limit, so 4 was fining the policy for solver noise) and
@@ -45,6 +48,8 @@ env:
   # Scene randomisation: top-down band from MEASUREMENTS.md, plus per-episode re-sizing
   object_radius_range_m: [0.25, 0.45]
   object_scale_range: [0.75, 1.30]
+  patient_hand_slab: false     # the IK track's table slab; not part of this patient
+  head_scale_range: [0.92, 1.08]   # a different-sized head every episode
   small_object_prob: 0.35      # apple -> strawberry-sized, block -> bite-sized cube, this often
   small_scale_range: [0.45, 0.60]   # x the nominal size; mass follows scale**3
   full_size_width_m: 0.05      # at or above this width the arm runs at full speed and full grip force

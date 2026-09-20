@@ -65,6 +65,8 @@ def shield(e, a):
         if not (md.geom_contype[ga] or md.geom_conaffinity[ga]):
             continue
         for gu in e.user_geoms:
+            if not (md.geom_contype[gu] or md.geom_conaffinity[gu]):
+                continue                    # hair, eyes, ears are drawn, not solid; the hair shell is bigger than the skull
             # Head and torso get the full margin (the punch case). The hand rests ON the table inside
             # the workspace, so the arm is routinely within 4 cm of it; with one margin for everything
             # the shield froze 44/60 episodes and pick-ups fell 68% -> 50%.
@@ -83,8 +85,15 @@ def shield(e, a):
     mujoco.mj_jac(md, d, _jp, None, ft[:3], int(md.geom_bodyid[ga]))
     v = _jp[:, e.dadr] @ (np.asarray(a[0][:6], dtype=float) * float(e.ecfg["action_delta_rad"]))
     if float(v @ (toward / n)) > 0.0:
+        # Do not just freeze: a frozen arm mid-lift stayed frozen for 250-340 steps with the object in the
+        # air (the lift raises the elbow toward the head, so every further lift command was vetoed). Back
+        # the offending point straight away from the person at 3 cm/s, jaws untouched, and let the caller
+        # try again once there is room.
+        away = -(toward / n) * 0.03 * (1.0 / 30.0)
+        Jp = _jp[:, e.dadr]
+        dq = Jp.T @ np.linalg.solve(Jp @ Jp.T + 1e-4 * np.eye(3), away)
         a = np.array(a, dtype=np.float32, copy=True)
-        a[0, :6] = 0.0
+        a[0, :6] = np.clip(dq / float(e.ecfg["action_delta_rad"]), -1.0, 1.0)
         return a, best, True
     return a, best, False
 

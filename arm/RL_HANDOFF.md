@@ -9,6 +9,44 @@ which is a *different and still-valid* route to the same demo).
 
 ---
 
+## 000. FEEDING (2026-09-20 ~05:30 PDT) - scripted, camera-only, on top of the final grasp
+
+`arm/rl/scripts/hybrid_feed.py` (headless, numbers) / `watch_feed.py` (GX10 monitor; `CALIBRATE=1` for the
+contact-detection runs). Sequence: learned reach -> learned place+pinch -> scripted lift -> pull back and
+level toward the person -> centre the FACE in the wrist camera (object ignored) -> approach slowing as the
+face looms -> stop on apparent face size. Outcome ranking is the user's: (1) arriving at the head too fast
+or any arm/claw contact, (2) dropping, (3) everything else.
+
+**THE BENCHMARK (written down as asked): with contact detection ON, the food first touches the face when the
+face is 50.9 deg wide (min 44.1, p10 49.2, max 55.5; 28 touches, head size +-8%).**
+On the fitted lens (marked 150 deg; taken as the diagonal of an equidistant fisheye at 16:9, so ~131 deg
+across) that is **~39% of the image width**. Stored in `arm/rl/configs/feed_calibration.json`.
+ANGLES, not pixels: the sim camera is a pinhole and the real one a fisheye, so only degrees transfer, and
+only after the real lens is calibrated (cv2.fisheye). Small heads touch at ~50.8 deg, large at ~52.2.
+
+**Without contact information** (stop at the touch size minus a 1.5 cm stand-off = 46.8 deg), 3 x 40 runs:
+fast-arrival/arm-contact **0/120** (closing speed on the face max 0.013 m/s, limit 0.03), dropped **5/120**,
+fed **80/120 = 67%**. Food ends ~46 mm in front of the mouth, ~12 mm to the side; he leans in to bite.
+
+What it took (each measured; details in the script comments):
+- speed is a SCHEDULE on face size (crawl 0.012 m/s from 12 deg before touch), so even a missed stop arrives
+  at a crawl; rotation and sideways corrections are capped near the face too; never advances with the face
+  out of view.
+- claws rolled so their fin points at the chin, food aimed 2 cm below the mouth: claw->nose contacts 7/24 -> ~0.
+- DROPS WERE A SIM ARTEFACT: held objects crept ~0.1 mm/step across the plate under a constant 8 N grip
+  (MuJoCo soft friction) until they fell out: 21% of feeds. `noslip_contacts` (elliptic cone, impratio 10,
+  4 no-slip iterations) -> 4%. Also: gripping plates 12 -> 28 mm, hold = jaw gap at pinch minus 20 mm.
+- the head is now average adult proportions (152 x 196 x 230 mm ellipsoid, 24 mm nose, chin) with a face,
+  rescaled +-8% and drawn in one of the ten Monk skin tones each episode; the nose COLLIDES.
+- `user_hand` (IK-track table slab) is switched off for this patient.
+- shield(): solid geometry only; backs the arm away instead of freezing; a tripped lift gives way up-and-back.
+
+OPEN: "lift stalled below 100 mm" ~8%, "no seated pinch" ~14% (the frozen pinch policy predates the no-slip
+contacts: grasp-only harness fell 78% -> 52% under them; re-tuning or a short RL fine-tune of place+pinch on
+the new contacts is the obvious next gain). Peak accel measures 0.6-0.7 m/s^2 against a commanded 0.35.
+
+---
+
 ## 00. GRASP IS FINAL (2026-09-20 ~03:50 PDT) - supersedes everything below about grasp/lift
 
 **The grasp stage is a HYBRID, and it is frozen.** Pure RL never learned the lift (0% through 5.6M + 4M

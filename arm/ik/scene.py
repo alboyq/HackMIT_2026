@@ -68,7 +68,7 @@ CAM_RES = int(os.environ.get("YAM_CAM_RES", "256"))
 # The team is fitting a 100-degree, low-distortion lens (not the fisheye). NOTE: MuJoCo's fovy is the
 # VERTICAL angle and the visibility test treats the view as square. If the lens's 100 deg is its
 # diagonal on a 4:3 sensor, the true vertical is ~70 deg -- check the spec sheet and set this.
-WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "100"))
+WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "150"))   # the fitted lens is marked 150
 SCENE_FOVY = float(os.environ.get("YAM_SCENE_FOVY", "58"))
 GRIP_KP = float(os.environ.get("YAM_GRIP_KP", "800"))    # see _patched_arm
 # How far the fingertips sit off the wrist roll axis. The stock i2rt model hangs its fingers
@@ -301,11 +301,26 @@ def build_scene_xml(objects=None, user=(USER_X, USER_Y, USER_Z)) -> str:
     <!-- seated user: geometry only. Nothing learned looks at a face; the head exists so the
          planner has something to avoid and the virtual wall has something to wrap. -->
     <body name="user_head" pos="{ux:.4f} {uy:.4f} {uz:.4f}">
-      <geom name="head" type="sphere" size="{HEAD_R:.4f}" material="skin"/>
-      <geom name="nose" type="capsule" fromto="{-HEAD_R * 0.92:.4f} 0 -0.005 {-HEAD_R * 1.12:.4f} 0 -0.020"
-            size="0.012" material="skin"/>
-      <site name="mouth" pos="{-HEAD_R * 0.92:.4f} 0 -0.038" size="0.010" rgba="0.8 0.15 0.15 1" group="4"/>
-      <site name="face" pos="{-HEAD_R:.4f} 0 0" size="0.008" rgba="0.8 0.5 0.15 1" group="4"/>
+      <!-- Average adult proportions (anthropometric means, both sexes): head breadth 152 mm, head length
+           196 mm, chin-to-crown 230 mm, nose protrusion ~24 mm. The old head was a 190 mm SPHERE: 25%
+           too wide across the face, which is exactly the dimension the feed measures range from. The env
+           rescales all of this +-8% per episode and draws it in a random skin tone. The features are
+           visual only: they make the wrist-camera view look like what the real detector will look for. -->
+      <geom name="head" type="ellipsoid" size="0.098 0.076 0.115" material="skin"/>
+      <geom name="nose" type="capsule" fromto="-0.0900 0 0.010 -0.1080 0 -0.018" size="0.013" material="skin"/>
+      <geom name="chin" type="sphere" pos="-0.0640 0 -0.0930" size="0.030" material="skin"/>
+      <geom name="ear_l" type="ellipsoid" pos="0.005 0.077 0.000" size="0.012 0.008 0.028" material="skin" contype="0" conaffinity="0"/>
+      <geom name="ear_r" type="ellipsoid" pos="0.005 -0.077 0.000" size="0.012 0.008 0.028" material="skin" contype="0" conaffinity="0"/>
+      <geom name="eye_l" type="sphere" pos="-0.0820 0.0320 0.0220" size="0.0125" rgba="0.97 0.97 0.95 1" contype="0" conaffinity="0"/>
+      <geom name="eye_r" type="sphere" pos="-0.0820 -0.0320 0.0220" size="0.0125" rgba="0.97 0.97 0.95 1" contype="0" conaffinity="0"/>
+      <geom name="pupil_l" type="sphere" pos="-0.0915 0.0320 0.0220" size="0.0060" rgba="0.10 0.07 0.05 1" contype="0" conaffinity="0"/>
+      <geom name="pupil_r" type="sphere" pos="-0.0915 -0.0320 0.0220" size="0.0060" rgba="0.10 0.07 0.05 1" contype="0" conaffinity="0"/>
+      <geom name="brow_l" type="capsule" fromto="-0.0900 0.0160 0.0440 -0.0830 0.0480 0.0420" size="0.0040" rgba="0.12 0.09 0.07 1" contype="0" conaffinity="0"/>
+      <geom name="brow_r" type="capsule" fromto="-0.0900 -0.0160 0.0440 -0.0830 -0.0480 0.0420" size="0.0040" rgba="0.12 0.09 0.07 1" contype="0" conaffinity="0"/>
+      <geom name="lips" type="capsule" fromto="-0.0880 -0.0220 -0.0480 -0.0880 0.0220 -0.0480" size="0.0060" rgba="0.62 0.22 0.22 1" contype="0" conaffinity="0"/>
+      <geom name="hair" type="ellipsoid" pos="0.0140 0 0.0300" size="0.1000 0.0790 0.1000" rgba="0.10 0.08 0.06 1" contype="0" conaffinity="0"/>
+      <site name="mouth" pos="-0.0890 0 -0.0480" size="0.010" rgba="0.8 0.15 0.15 1" group="4"/>
+      <site name="face" pos="-0.0960 0 -0.0100" size="0.008" rgba="0.8 0.5 0.15 1" group="4"/>
     </body>
     <body name="user_torso" pos="{ux + 0.12:.4f} {uy:.4f} {max(0.20, uz - 0.22):.4f}">
       <geom name="torso" type="box" size="0.10 0.17 0.19" material="shirt"/>
