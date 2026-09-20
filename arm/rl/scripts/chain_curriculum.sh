@@ -14,7 +14,7 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 PY=.venv-arm/bin/python
 
 # stage:timesteps -- reach is the long one; later stages inherit most of the behaviour
-STAGES="reach:3000000 grasp:2000000 lift:2000000 present:3000000"
+STAGES="reach:1200000 grasp:3000000 lift:2000000 present:4000000"
 PREV=""
 
 for entry in $STAGES; do

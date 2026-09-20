@@ -122,6 +122,9 @@ class OpenYAMFeedEnv(gym.Env):
         self.phase = 0
         self.prev_dist = 0.0
         self.object_start = np.zeros(3)
+        self.obj_bias = np.zeros(3)
+        self.mouth_bias = np.zeros(3)
+        self.width_bias = 0.0
         self.prev_tcp = np.zeros(3)
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
@@ -179,13 +182,47 @@ class OpenYAMFeedEnv(gym.Env):
                 peak = max(peak, abs(float(self._wrench[0])))
         return peak
 
+    def _sample_perception_bias(self):
+        """Per-episode calibration error. Fixed for the whole episode, because a miscalibrated
+        camera is wrong in the same direction all run -- it does not average out."""
+        n = self.cfg.get("perception_noise", {})
+        if not n.get("enabled", False):
+            self.obj_bias = np.zeros(3)
+            self.mouth_bias = np.zeros(3)
+            self.width_bias = 0.0
+            return
+        self.obj_bias = self.np_random.normal(0, float(n["object_bias_m"]), 3)
+        self.mouth_bias = self.np_random.normal(0, float(n["mouth_bias_m"]), 3)
+        self.width_bias = float(self.np_random.normal(0, float(n["width_rel"])))
+
+    def _perceived(self, true_point, bias, jitter_key):
+        """Eye-in-hand error shrinks with range: the same pixel error is fewer millimetres when
+        the lens is close, and the table-plane depth assumption is least wrong up close."""
+        n = self.cfg.get("perception_noise", {})
+        if not n.get("enabled", False):
+            return true_point
+        rng_m = float(np.linalg.norm(true_point - self._tcp()))
+        scale = float(np.clip(rng_m / float(n["reference_range_m"]),
+                              float(n["min_scale"]), float(n["max_scale"])))
+        return (true_point + bias * scale
+                + self.np_random.normal(0, float(n[jitter_key]) * scale, 3))
+
     def _observation(self) -> np.ndarray:
         grip = 2.0 * (self.data.ctrl[self.grip_aid] - self.grip_range[0]) / np.ptp(self.grip_range) - 1.0
         tcp = self._tcp()
-        obj = self.scene.object_pos(self.name)
+        # What a camera would report, not what the simulator knows.
+        obj_seen = self._perceived(self.scene.object_pos(self.name), self.obj_bias, "object_jitter_m")
+        mouth_seen = self._perceived(self.mouth, self.mouth_bias, "mouth_jitter_m")
+        # The goal is derived from whichever of those the stage is chasing, so its error is
+        # consistent with the thing it was measured from.
+        if self.stage == "present":
+            target_seen = self.target + (mouth_seen - self.mouth)
+        else:
+            target_seen = self.target + (obj_seen - self.scene.object_pos(self.name))
+        width_seen = float(self.width[self.name]) * (1.0 + self.width_bias)
         return np.concatenate((self.data.qpos[self.qadr], self.data.qvel[self.dadr], [grip],
-                               self.target - tcp, self.mouth - tcp, self.mouth - obj,
-                               self.onehot, [self.width[self.name]],
+                               target_seen - tcp, mouth_seen - tcp, mouth_seen - obj_seen,
+                               self.onehot, [width_seen],
                                self.prev_action)).astype(np.float32)
 
     # ------------------------------------------------------------------ episode
@@ -273,6 +310,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.phase = 0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
+        self._sample_perception_bias()
         self.object_start = self.scene.object_pos(self.name).copy()
         self.prev_tcp = self._tcp().copy()
         self.prev_dist = float(np.linalg.norm(self.target - self._tcp()))
@@ -338,7 +376,14 @@ class OpenYAMFeedEnv(gym.Env):
         self.wall_hits += int(breached)
 
         if self.stage == "reach":
-            success = distance <= float(self.ecfg["success_distance_m"])
+            # Arrive AND settle. Handing grasp a moving wrist lets momentum carry the gripper
+            # through the object before the jaws can act.
+            joint_speed = float(np.abs(self.data.qvel[self.dadr]).max())
+            settled = (distance <= float(self.ecfg["success_distance_m"])
+                       and joint_speed <= float(self.ecfg["reach_settle_qvel"])
+                       and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
+            self.hold_steps = self.hold_steps + 1 if settled else 0
+            success = self.hold_steps >= round(float(self.ecfg["reach_settle_s"]) / self.dt)
         elif self.stage == "grasp":
             settled = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2])) <= float(
                 self.ecfg["grasp_max_displacement_m"])
@@ -457,7 +502,7 @@ class OpenYAMFeedEnv(gym.Env):
                 "object_displaced_m": displaced, "self_collisions": self.self_collisions,
                 "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius,
                 "grip_fraction": grip_fraction, "lead_margin_m": lead_margin,
-                "tcp_speed_mps": tcp_speed, "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
+                "tcp_speed_mps": tcp_speed, "joint_speed": float(np.abs(self.data.qvel[self.dadr]).max()), "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
                 "knocked": bool(self.knocked), "lost": bool(lost)}
         return self._observation(), float(reward), bool(success), bool(truncated), info
 

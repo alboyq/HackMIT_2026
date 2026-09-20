@@ -116,7 +116,9 @@ def main() -> None:
         done = 0 if transferred else model.num_timesteps
         print(f"[resume] {model_path.name} at {done} steps; {max(0, total - done)} remaining")
         if done >= total:
-            print("[resume] target already reached; nothing to do")
+            print(f"[resume] target already reached at {done} steps; writing final")
+            model.save(args.run_dir / f"ppo_{args.stage}_final")
+            env.save(str(args.run_dir / "vecnormalize.pkl"))
             env.close()
             return
         remaining = total - done

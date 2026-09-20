@@ -6,7 +6,11 @@ env:
   control_hz: 30
   physics_substeps: 4          # 8 -> 4: ~1.5x faster, contact is still stable at 120 Hz
   episode_steps: 300           # present needs time to reach, grasp, lift AND carry
-  success_distance_m: 0.035     # 2 cm was tight for a 6-DoF arm under a velocity cap
+  success_distance_m: 0.035
+  # Reach must ARRIVE AND STOP, so grasp starts from rest.
+  reach_settle_qvel: 0.10        # rad/s, worst joint
+  reach_settle_speed_mps: 0.03
+  reach_settle_s: 0.20     # 2 cm was tight for a 6-DoF arm under a velocity cap
 
   # Control / safety envelope
   action_delta_rad: 0.02
@@ -89,3 +93,17 @@ training:
   ent_coef: 0.004              # more exploration than 0.001; reach stalled at 5% before
   policy_layers: [256, 256]
   checkpoint_freq: 10000       # ~2.5 s of progress at risk in a hard crash
+
+# What one fisheye wrist camera plus a table-plane assumption can actually deliver.
+# Bias is per-episode (calibration is wrong the same way all run); jitter is per-frame.
+# Applied to the OBSERVATION only -- reward and success still use ground truth.
+perception_noise:
+  enabled: true
+  object_bias_m: 0.012      # extrinsics + assumed table height + wide-angle distortion fit
+  object_jitter_m: 0.004    # frame-to-frame detection noise
+  mouth_bias_m: 0.020       # a face is not on the table plane, so its depth is a weaker estimate
+  mouth_jitter_m: 0.008
+  reference_range_m: 0.30   # error quoted at this range; scales with distance
+  min_scale: 0.25           # never perfect, even at contact
+  max_scale: 1.60
+  width_rel: 0.10           # pixel extent through an assumed depth: relative, not absolute
