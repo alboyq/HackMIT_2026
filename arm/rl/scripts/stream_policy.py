@@ -17,6 +17,7 @@ import argparse
 import os
 import re
 import threading
+import pickle
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -244,6 +245,9 @@ def main() -> None:
                 if nck != ck:
                     ck = nck
                     model = PPO.load(ck, device="cpu")
+                    # and the normalisation those weights were trained against
+                    with open(nvn, "rb") as fh:
+                        env.obs_rms = pickle.load(fh).obs_rms
             except SystemExit:
                 pass
         def draw_prior(e):

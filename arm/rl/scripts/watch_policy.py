@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import pickle
 import time
 from pathlib import Path
 
@@ -103,7 +104,10 @@ def main() -> None:
                 if new_path != model_path:
                     model_path = new_path
                     model = PPO.load(model_path, device="cpu")
-                    env.load_running_average = None  # stats reload below
+                    # New weights need the normalisation they were trained against. Reloading
+                    # only the model showed 0/9 on a policy that measured 17/30.
+                    with open(new_stats, "rb") as fh:
+                        env.obs_rms = pickle.load(fh).obs_rms
                     print(f"[watch] reloaded {model_path.name}", flush=True)
             except SystemExit:
                 pass

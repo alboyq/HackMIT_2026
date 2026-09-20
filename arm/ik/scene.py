@@ -67,6 +67,10 @@ CAM_RES = int(os.environ.get("YAM_CAM_RES", "256"))
 WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "75"))
 SCENE_FOVY = float(os.environ.get("YAM_SCENE_FOVY", "58"))
 GRIP_KP = float(os.environ.get("YAM_GRIP_KP", "800"))    # see _patched_arm
+# How far the fingertips sit off the wrist roll axis. The stock i2rt model hangs its fingers
+# 44 mm to one side (measured: TCP 44.0 mm off joint6's axis). The team's printed fingers
+# converge onto the centreline, so the real grasp point is ON the axis. 0 = in the middle.
+FINGER_OFFSET_M = float(os.environ.get("YAM_FINGER_OFFSET_M", "0.0"))
 GRIP_KV = float(os.environ.get("YAM_GRIP_KV", "30"))
 
 # the user, seated across the table from the arm (metres, robot base frame)
@@ -153,11 +157,61 @@ def _patched_arm() -> Path:
     # kp=800 gives ~23 N at the joint and ~10 N per pad through the finger linkage.
     src = src.replace('<position ctrlrange="0.0 0.041" kp="100" kv="10" inheritrange="0"/>',
                       f'<position ctrlrange="0.0 0.041" kp="{GRIP_KP:g}" kv="{GRIP_KV:g}" inheritrange="0"/>')
+    src = _centre_fingers(src)
     k0 = src.find("<keyframe>")
     if k0 != -1:
         k1 = src.index("</keyframe>") + len("</keyframe>")
         src = src[:k0] + src[k1:]
     return _write(src, "yam_wristcam")
+
+
+def _centre_fingers(src: str) -> str:
+    """Make the jaws the team's printed fingers: on the wrist axis, tapered, and drawn honestly.
+
+    * The stock i2rt model hangs `lf_down`/`rf_down` 44 mm to one side of joint6's axis. The
+      printed fingers converge onto the centreline, so the grasp point belongs ON the axis.
+    * The stock finger meshes are visual-only and much larger than the collision plates, so the
+      gripper appeared to pass through objects (measured penetration was 1-3 mm; the rest was
+      the drawing). They are hidden; the collision fingers are drawn instead, plus a tapered
+      visual body behind each plate, so what is seen is what touches.
+    * `lf_rot`/`rf_rot` are the stock crank linkage out to the old finger position. Nothing is
+      there on the real gripper, so they neither collide nor draw.
+    """
+    for side, sign in (("lf_down", "-"), ("rf_down", "")):
+        stock = f'<body name="{side}" quat="1 0 0 0" pos="{sign}0.044 0.0 0.0"'
+        if src.count(stock) != 1:
+            raise RuntimeError(f"{ARM_XML}: {side} is not where it was -- model changed?")
+        off = -FINGER_OFFSET_M if sign else FINGER_OFFSET_M
+        src = src.replace(stock, f'<body name="{side}" quat="1 0 0 0" pos="{off:g} 0.0 0.0"')
+
+    blue = 'rgba="0.381493 0.492734 0.780446 1"'
+    wedge = ('<geom type="mesh" mesh="printed_finger" contype="0" conaffinity="0" group="2" '
+             'density="0" rgba="0.10 0.10 0.11 1"/>\n                        ')
+    for rot, down in (("lf_rot", "lf_down"), ("rf_rot", "rf_down")):
+        r0 = src.index(f'<body name="{rot}"')
+        d0 = src.index(f'<body name="{down}"')
+        d1 = src.index("</body>", d0)
+        linkage = src[r0:d0].replace(blue, 'rgba="0 0 0 0" contype="0" conaffinity="0"')
+        finger = (src[d0:d1].replace('class="collision"', 'class="collision" group="2"')
+                            .replace(blue, 'rgba="0.13 0.13 0.15 1"'))
+        first = finger.index("<geom")
+        finger = finger[:first] + wedge + finger[first:]
+        src = src[:r0] + linkage + finger + src[d1:]
+    for mesh in ("model2__14", "model2__15", "model2__16", "model2__17"):
+        tag = f'mesh="{mesh}"/>'
+        if src.count(tag) != 1:
+            raise RuntimeError(f"{ARM_XML}: finger mesh {mesh} not found -- model changed?")
+        src = src.replace(tag, f'mesh="{mesh}" rgba="0 0 0 0"/>')
+    # Tapered body, in the finger frame: x across the paddle, -y outward from the gripping face,
+    # z along the finger. Wide and set back at the base, narrow and right behind the plate at
+    # the tip, so the pair converge onto the centreline like the printed ones.
+    verts = []
+    for z, hx, y_in, y_out in ((0.0, 0.022, -0.020, -0.034), (0.084, 0.006, -0.0045, -0.0075)):
+        verts += [(hx, y_in, z), (-hx, y_in, z), (hx, y_out, z), (-hx, y_out, z)]
+    vertex = "  ".join(f"{x:g} {y:g} {z:g}" for x, y, z in verts)
+    if src.count("<asset>") != 1:
+        raise RuntimeError(f"{ARM_XML}: expected one <asset> block")
+    return src.replace("<asset>", f'<asset>\n    <mesh name="printed_finger" vertex="{vertex}"/>', 1)
 
 
 def _write(xml: str, stem: str) -> Path:
