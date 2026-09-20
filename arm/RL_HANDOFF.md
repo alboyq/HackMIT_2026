@@ -9,6 +9,65 @@ which is a *different and still-valid* route to the same demo).
 
 ---
 
+## 0. UPDATE 2026-09-19 21:10 PDT — read this first; it supersedes §3 and §4
+
+**Training is PAUSED on purpose** (the team was physically moving the setup). Grasp is saved at
+`runs/feed-grasp/ppo_grasp_paused.zip`, 60,460 steps. Resume with the chain command in §8.
+That checkpoint predates the reward changes below, so the first thing to do on resume is decide
+whether to keep it (it will adapt) or archive `runs/feed-grasp` and start clean. Start clean.
+
+**Why grasp sat at 0% — it was never a reward problem.** Census over 30 deterministic episodes
+at 750k: jaws ever commanded closed **0/30**; in position by step ~35, then parked ~260 steps.
+Forcing the jaws shut at the policy's own hover pose succeeded **8/20**, so geometry was fine.
+Cause: reach charges for any closing and nothing charges for overshooting the action clip, so
+the gripper mean ran away to **+1.87 unclipped** (std 0.54, later 0.31). Every sample clipped to
+the same fully-open command, `close_bonus` saw zero variance, and the gradient was exactly zero.
+`run_resumable.py::reset_gripper_head` now zeroes the gripper output row and restores std 1.0
+whenever a stage is seeded from reach. Result from home: 0.15 @ 225k, 0.35 @ 655k.
+**General lesson: a clipped action whose mean is past the clip cannot learn, whatever it is paid.**
+Check `policy.get_distribution(obs).distribution.mean` before touching a reward.
+
+**Stages now start at the hand-off** (`env.handoff` in feed.yaml). `reset()` plays the FROZEN
+earlier stages until their own success test fires, then the live stage begins from that state.
+Measured: reach 25/25 in ~43 steps, settled, 10-25 mm lateral, 25-55 mm above, object
+undisturbed, 91 ms/reset. Grasp hit 0.11 @ 51k this way. A missing prior raises; it never
+falls back to home silently. Viewers draw the frozen part via `env.prior_hook`.
+
+**Reward holes closed (all the same arithmetic family):**
+- `lift_bonus * height` was uncapped rent: 0.9/step at 30 cm = 270/episode vs success 50. Once
+  pinched, the best income was to swing the object as high as possible — the "goes crazy after
+  grabbing" seen on screen. Height now pays as capped PROGRESS (0.8 total, once).
+- Knocking the object off the table ended the episode for -4 while parking cost -15, so the
+  policy learned to end episodes by throwing (9/20 episodes displaced ~450 mm = the lost
+  threshold). Early failure now charges the time it skipped, so it is never cheaper than the clock.
+- Unwinnable episodes end: grasp past its 4 cm gate, lift past 10 cm drift. `terminated` is now
+  `success or failed` — read `info["success"]`, not `terminated`.
+- Displacement gates are measured from where the STAGE began, not the episode.
+
+**Lift is now "straight up, then stop"**: carrying, within `lift_height_m .. +lift_band_m`,
+drifted <= `lift_max_drift_m` (3 cm) sideways, and settled (same gates as reach) for 0.5 s, so
+present starts from a stationary pose. Sideways travel, overshoot and moving-at-height are costs.
+Drop penalty now applies in lift too.
+
+**KNOWN HOLE, not fixed:** in `present`, `carry_bonus + lead_bonus` are per-step rent worth
+105/episode vs success 50. It is an `xfail` in `test_reward_shape.py`. Fix before training present.
+
+**"Phasing" through objects is mostly rendering.** The drawn finger meshes do not collide;
+physics uses thin plates, capsules and 0.6 mm pad spheres well inside the drawn outline. Real
+penetration is 1-3 mm. `arm/rl/scripts/diag/render_gripper.py` renders drawn-vs-collision side by side.
+
+**Open question for the user:** they say the real gripper is "more in the middle" than the sim
+one and offered photos. Not yet resolved — do not guess at it; get the photos.
+
+**Filmstrip bug (cosmetic):** the last panel's image is the post-auto-reset scene; its caption is
+still the true final step.
+
+Diagnostics in `arm/rl/scripts/diag/`: `diag_grasp2.py` (failure census with timing),
+`diag_grasp3.py` (force-close test + action std), `diag_sat.py` (unclipped action means),
+`diag_phase2.py` (penetration vs substeps), `test_handoff.py` (hand-off state statistics).
+
+---
+
 ## 1. The one-paragraph version
 
 We are training a low-dimensional PPO policy to pick one named object out of three on a table

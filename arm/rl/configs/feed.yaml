@@ -4,7 +4,10 @@ project:
 env:
   stage: reach
   control_hz: 30
-  physics_substeps: 4          # 8 -> 4: ~1.5x faster, contact is still stable at 120 Hz
+  physics_substeps: 8          # measured: 4 -> 8 costs 5% (829 -> 788 steps/s, python dominates),
+                               # halves contact-force spikes (14.1 N -> 7.7 N against a 12 N
+                               # crush limit, so 4 was fining the policy for solver noise) and
+                               # trims worst penetration 4.4 -> 3.1 mm. Reach hand-off still 20/20.
   episode_steps: 300           # present needs time to reach, grasp, lift AND carry
   success_distance_m: 0.035
   # Reach must ARRIVE AND STOP, so grasp starts from rest.
@@ -64,6 +67,9 @@ env:
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.08
   lift_hold_s: 0.5
+  lift_band_m: 0.06            # stop between lift_height_m and this much above it
+  lift_max_drift_m: 0.03       # straight up: the object may not wander sideways
+  lift_abort_drift_m: 0.10     # past this the lift has failed; end the episode
 
   # Reward shaping
   # Grip force. HANDOFF.md 8: the sim runs kp=800 (~10 N per pad); the REAL limit is unverified,
@@ -74,7 +80,10 @@ env:
   grip_band_bonus: 0.05
 
   grasp_bonus: 0.05
-  lift_bonus: 3.0
+  lift_progress_gain: 10.0     # x lift_height_m = 0.8 in total, paid once, as progress
+  drift_penalty: 2.0           # per metre sideways per step while lifting: a cost
+  overshoot_penalty: 2.0       # per metre above the band
+  hover_speed_penalty: 0.05    # at height, moving costs and being still is free
   carry_bonus: 0.05
   lead_bonus: 0.20             # food ahead of the jaws
   speed_penalty: 2.0

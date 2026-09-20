@@ -67,6 +67,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.prior_hook = None       # viewers set this to draw the frozen stages too
         self.handoff_ok = True
         self.handoff_steps = 0
+        self.prev_lift = 0.0
+        self.stage_object_start = np.zeros(3)
 
         self.scene = YamScene(objects=list(OBJECTS))
         self.model, self.data = self.scene.model, self.scene.data
@@ -340,6 +342,10 @@ class OpenYAMFeedEnv(gym.Env):
         self.phase = 0
         self.settle_calm = 0.0
         self.prev_tcp = self._tcp().copy()
+        # Each stage is judged on what IT did to the object, not on what it inherited.
+        self.stage_object_start = obj_pos.copy()
+        self.prev_lift = float(np.clip(obj_pos[2] - self.rest_z[self.name], 0.0,
+                                       float(self.ecfg["lift_height_m"])))
 
     def _load_priors(self) -> list:
         """Frozen policies for every stage before this one, with their observation statistics."""
@@ -373,13 +379,13 @@ class OpenYAMFeedEnv(gym.Env):
             for _ in range(int(self.handoff.get("max_steps", 150))):
                 action, _ = policy.predict(np.clip((obs - mean) / std, -clip, clip)[None],
                                            deterministic=True)
-                obs, _, done, truncated, _ = self.step(action[0])
+                obs, _, done, truncated, info = self.step(action[0])
                 self.handoff_steps += 1
                 if self.prior_hook is not None:
                     self.prior_hook(self)
                 if done or truncated:
                     break
-            if not done:
+            if not info["success"]:
                 return False
         return True
 
@@ -451,6 +457,10 @@ class OpenYAMFeedEnv(gym.Env):
         closed = self.data.ctrl[self.grip_aid] < 0.45 * self.grip_range[1]
         lifted = float(obj_pos[2]) >= self.rest_z[self.name] + float(self.ecfg["lift_height_m"])
         carrying = pinched and closed and lifted
+        lift_h = float(self.ecfg["lift_height_m"])
+        height = float(obj_pos[2]) - self.rest_z[self.name]
+        stage_drift = float(np.linalg.norm(obj_pos[:2] - self.stage_object_start[:2]))
+        joint_speed_now = float(np.abs(self.data.qvel[self.dadr]).max())
 
         # Virtual wall around the head: never reward getting closer than this.
         wall = float(self.ecfg["pad_min_distance_m"])
@@ -473,12 +483,17 @@ class OpenYAMFeedEnv(gym.Env):
             self.settle_calm = (1.0 - min(1.0, joint_speed / float(self.ecfg["reach_settle_qvel"]))
                                 if distance <= float(self.ecfg["success_distance_m"]) else 0.0)
         elif self.stage == "grasp":
-            settled = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2])) <= float(
-                self.ecfg["grasp_max_displacement_m"])
+            settled = stage_drift <= float(self.ecfg["grasp_max_displacement_m"])
             self.hold_steps = self.hold_steps + 1 if (pinched and closed and settled) else 0
             success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
         elif self.stage == "lift":
-            self.hold_steps = self.hold_steps + 1 if carrying else 0
+            # Straight up, then STOP. Present needs a stationary, known starting pose, and an
+            # object dragged sideways on the way up is one that was nearly knocked over.
+            at_height = carrying and height <= lift_h + float(self.ecfg["lift_band_m"])
+            steady = (joint_speed_now <= float(self.ecfg["reach_settle_qvel"])
+                      and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
+            straight = stage_drift <= float(self.ecfg["lift_max_drift_m"])
+            self.hold_steps = self.hold_steps + 1 if (at_height and steady and straight) else 0
             success = self.hold_steps >= round(float(self.ecfg["lift_hold_s"]) / self.dt)
         else:
             near = distance <= float(self.ecfg["present_tolerance_m"])
@@ -522,8 +537,22 @@ class OpenYAMFeedEnv(gym.Env):
             reward += float(self.ecfg["in_position_bonus"])
         else:
             reward += float(self.ecfg["pinch_bonus"])
-            reward += float(self.ecfg["lift_bonus"]) * max(
-                0.0, float(obj_pos[2]) - self.rest_z[self.name])
+            # Height pays as PROGRESS, capped at the lift height, so it telescopes to a fixed
+            # total and cannot be farmed. The old `lift_bonus * height` was rent with no ceiling:
+            # 0.9/step at 30 cm, 270 an episode against a success bonus of 50, so once pinched the
+            # best income was to swing the object as high as the arm goes.
+            if self.stage != "grasp":
+                capped = float(np.clip(height, 0.0, lift_h))
+                reward += float(self.ecfg["lift_progress_gain"]) * (capped - self.prev_lift)
+                self.prev_lift = capped
+            if self.stage == "lift":
+                # All three are COSTS. Sideways travel, going past the band, and moving once up.
+                # The speed cost fades in with height so there is no cliff to stall beneath.
+                reward -= float(self.ecfg["drift_penalty"]) * stage_drift
+                reward -= float(self.ecfg["overshoot_penalty"]) * max(
+                    0.0, height - lift_h - float(self.ecfg["lift_band_m"]))
+                reward -= (float(self.ecfg["hover_speed_penalty"]) * (capped / lift_h) ** 2
+                           * min(1.0, joint_speed_now / float(self.ecfg["reach_settle_qvel"])))
             if self.stage == "present":
                 reward += float(self.ecfg["carry_bonus"]) * carrying
                 if carrying and lead_margin > 0.0:
@@ -536,7 +565,7 @@ class OpenYAMFeedEnv(gym.Env):
                         reward -= float(self.ecfg["speed_penalty"]) * excess
 
         # Losing the object after having held it is the failure mode that matters.
-        if self.stage == "present" and self.was_pinched and not pinched and self.steps > 10:
+        if self.stage in ("lift", "present") and self.was_pinched and not pinched and self.steps > 10:
             reward -= float(self.ecfg["drop_penalty"])
         self.was_pinched = pinched
 
@@ -581,7 +610,19 @@ class OpenYAMFeedEnv(gym.Env):
                 or float(obj_pos[2]) < float(self.ecfg["object_lost_z"]))
         if lost:
             reward -= float(self.ecfg["lost_penalty"])
-        truncated = self.steps >= int(self.ecfg["episode_steps"]) or lost
+        # An episode that can no longer succeed ends NOW. Left running, its only income is
+        # SECURE rent, and collecting that is what taught the policy to wave the object about.
+        failed = lost
+        if self.stage == "grasp":
+            failed |= stage_drift > float(self.ecfg["grasp_max_displacement_m"])
+        elif self.stage == "lift":
+            failed |= stage_drift > float(self.ecfg["lift_abort_drift_m"])
+        failed = failed and not success
+        if failed:
+            # Charge the time it skipped. Without this, flinging the object off the table cost
+            # 4 while parking cost 15, and the policy learned to end episodes by throwing.
+            reward -= float(self.ecfg["time_penalty"]) * (int(self.ecfg["episode_steps"]) - self.steps)
+        truncated = self.steps >= int(self.ecfg["episode_steps"])
         info = {"success": bool(success), "is_success": bool(success), "object": self.name,
                 "distance": distance, "max_joint_velocity": measured_velocity,
                 "peak_joint_velocity": self.peak_velocity, "velocity_cap": cap,
@@ -593,8 +634,9 @@ class OpenYAMFeedEnv(gym.Env):
                 "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius,
                 "grip_fraction": grip_fraction, "lead_margin_m": lead_margin,
                 "tcp_speed_mps": tcp_speed, "joint_speed": float(np.abs(self.data.qvel[self.dadr]).max()), "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
-                "knocked": bool(self.knocked), "lost": bool(lost)}
-        return self._observation(), float(reward), bool(success), bool(truncated), info
+                "knocked": bool(self.knocked), "lost": bool(lost), "failed": bool(failed),
+                "lift_m": height, "stage_drift_m": stage_drift}
+        return self._observation(), float(reward), bool(success or failed), bool(truncated), info
 
     def render(self):
         return self.scene.render("scene_cam", 640)

@@ -41,8 +41,9 @@ def test_phase_value_increases(path):
 def test_finishing_beats_loitering(path):
     e = load_config(path)["env"]
     steps = int(e["episode_steps"])
+    # grip_band_bonus stacks on pinch_bonus while holding, so it belongs in the rent.
     best_per_step = max(float(e["close_bonus"]) + float(e["in_position_bonus"]),
-                        float(e["pinch_bonus"]))
+                        float(e["pinch_bonus"]) + float(e["grip_band_bonus"]))
     loiter = (best_per_step - float(e["time_penalty"])) * steps
     success = float(e["success_bonus"])
     assert loiter < success, (
@@ -70,3 +71,33 @@ def test_objects_fit_the_gripper(path):
     assert float(e["pad_clearance_m"]) >= 0.015, (
         f"{path.name}: pad clearance {e['pad_clearance_m']*1000:.0f} mm leaves less per side "
         f"than the perception error, so the gripper cannot reliably straddle the object")
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_height_is_never_rent(path):
+    """`lift_bonus * height` paid 0.9/step at 30 cm with no ceiling -- 270 an episode against a
+    success bonus of 50 -- and the policy swung the object as high as it could. Height may only
+    pay as capped progress, whose total is fixed."""
+    e = load_config(path)["env"]
+    assert "lift_bonus" not in e, f"{path.name}: lift_bonus is per-step rent on height; use progress"
+    total = float(e["lift_progress_gain"]) * float(e["lift_height_m"])
+    assert total < 0.1 * float(e["success_bonus"]), (
+        f"{path.name}: lifting alone is worth {total:.1f}; it must stay small next to finishing")
+
+
+@pytest.mark.xfail(reason="KNOWN HOLE, present stage only: carry_bonus + lead_bonus are per-step "
+                          "rent (0.35/step, 105 an episode vs success 50). Fix before training present.",
+                   strict=False)
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_present_rent_cannot_beat_finishing(path):
+    e = load_config(path)["env"]
+    rent = (float(e["pinch_bonus"]) + float(e["grip_band_bonus"]) + float(e["carry_bonus"])
+            + float(e["lead_bonus"]) - float(e["time_penalty"]))
+    assert rent * int(e["episode_steps"]) < float(e["success_bonus"])
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_lift_gates_are_ordered(path):
+    e = load_config(path)["env"]
+    assert float(e["lift_max_drift_m"]) < float(e["lift_abort_drift_m"])
+    assert float(e["lift_band_m"]) > 0.02, "the stop band must be wider than the arm can hold"
