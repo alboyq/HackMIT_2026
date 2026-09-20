@@ -1,0 +1,22 @@
+=== jar_act_v3  Fri Sep 18 04:20:18 PDT 2026  calib=/Users/adipu/so101Sim/rl/real/camera_calib_side_v3.json bg=/Users/adipu/so101Sim/rl/real/bg episodes=500 steps=15000 BATCH=16 JAR_ZONE=0.31 0.41 -0.35 0.35 KP_SCALE=0.1 1.0 JAR_FRICTION=0.35-0.7 SIDE_ZFRAC=0.58
+DONE 531/548 episodes kept, 106490 frames, 327s -> /Users/adipu/so101Sim/rl/runs/jar_act_v3/demos
+training finished Fri Sep 18 04:25:52 PDT 2026: 
+best checkpoint:  (-1/48)
+-- best checkpoint, real-kitchen backgrounds only:
+-- best checkpoint, random never-the-kitchen backgrounds only:
+=== chain done Fri Sep 18 04:26:03 PDT 2026
+(restart without ACT_DILATION: torchvision ResNet18 BasicBlock does not support dilation)
+=== jar_act_v3  Fri Sep 18 04:26:13 PDT 2026  calib=/Users/adipu/so101Sim/rl/real/camera_calib_side_v3.json bg=/Users/adipu/so101Sim/rl/real/bg episodes=500 steps=20000 BATCH=16 JAR_ZONE=0.31 0.41 -0.35 0.35 KP_SCALE=0.1 1.0 JAR_FRICTION=0.35-0.7 SIDE_ZFRAC=0.58
+training finished Fri Sep 18 05:05:09 PDT 2026: done
+ACT jar step_10000 na25_preal0.5: 38/48 = 79% (mean max rise 0.080 m, 40s)
+ACT jar step_15000 na25_preal0.5: 41/48 = 85% (mean max rise 0.087 m, 36s)
+ACT jar step_20000 na25_preal0.5: 37/48 = 77% (mean max rise 0.079 m, 37s)
+ACT jar step_5000 na25_preal0.5: 38/48 = 79% (mean max rise 0.072 m, 36s)
+best checkpoint: /Users/adipu/so101Sim/rl/runs/jar_act_v3/act/step_15000 (41/48)
+ACT jar step_15000 na12_preal0.5: 31/48 = 65% (mean max rise 0.066 m, 42s)
+ACT jar step_15000 na50_preal0.5: 43/48 = 90% (mean max rise 0.091 m, 30s)
+-- best checkpoint, real-kitchen backgrounds only:
+ACT jar step_15000 na25_preal1.0: 83/96 = 86% (mean max rise 0.087 m, 63s)
+-- best checkpoint, random never-the-kitchen backgrounds only:
+ACT jar step_15000 na25_preal0.0: 80/96 = 83% (mean max rise 0.084 m, 63s)
+=== chain done Fri Sep 18 05:10:56 PDT 2026
