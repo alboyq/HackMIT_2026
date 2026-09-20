@@ -129,26 +129,43 @@ The measured failure is compounding divergence from a bounded per-step error, so
 deviation whose mechanism matches the symptom. The original handoff named it as suspect #2 and it
 was never tried. `yam_v10` tests it (`YAM_HZ=25`, `CHUNK_SIZE=50`).
 
-### What is left after that
+### VERDICT (2026-09-20, ~05:00): the floor is invariant. Stop configuring, change the design.
 
+`yam_v10` ran the 86 % recipe faithfully — 25 Hz, chunk 50, `na` 25, batch 8 — and landed at
+**2.94 deg** at step 12000, against v9's 2.82 and v7's 2.90. The control rate does not move it
+either.
 
-
-Fit improves with optimiser steps and shows no plateau:
-
-| run / step | train-set MAE |
+| variation | fit @ 12k |
 |---|---|
-| v3 step_2000 | 6.2 deg |
-| v7 step_4000 | 4.97 deg |
-| v7 step_8000 | 3.71 deg |
-| v3 step_8000 (batch 24, 3x samples/step) | 2.9 deg |
+| v7: 5 targets, 1,865 demos, 10 Hz, chunk 20 | 2.90 deg |
+| v9: 2 targets, no erasing, 10 Hz, chunk 20 | 2.82 deg |
+| v10: 2 targets, **25 Hz, chunk 50** | 2.94 deg |
 
-That is ~x0.75 per doubling, which projects to ~1.55 deg at **64k steps** — 3x more than any run
-has had. `yam_v7` is extended to 60k to test exactly that. A capacity-limited model would
-plateau; this does not, which is why steps and not data is the current bet.
+Invariant also to batch 8 vs 24, 887 vs 1,865 demos, wide vs pose-B camera, table vs none, blur
+on/off, erasing on/off, 4k-20k steps, temporal ensembling, and the eval augmentation profile.
+Needed: ~1.5 deg. Closed-loop never beat 4 %, and every non-zero sat inside checkpoint noise.
 
-If it plateaus above ~2 deg, the remaining levers in order: cut to 1-2 objects (less to fit),
-co-train with real frames, then the modular fallback in `../GAME_PLAN.md` §08 — which already
-scores 100 % in sim and now has the depth calibrator it was missing.
+**Do not spend more time on configuration.** The remaining ideas are design changes:
+
+1. **Change the action space — the most promising, and cheap to test.** The policy predicts
+   *absolute joint targets*, so with a randomised object position it must internalise inverse
+   kinematics across the workspace from ~1,900 demos. ALOHA, where this ACT recipe works from
+   ~50 demos, has a FIXED layout and never has to. Predicting a Cartesian end-effector delta is
+   close to a visual-servoing law and is what most randomised-scene policies use. `ToolFrame`
+   already gives the TCP and `ArmIK` already solves the inverse, so the expert can emit
+   Cartesian deltas and the runtime can convert back with the IK that already exists.
+2. **Orders more data.** MolmoBot, the result this plan is modelled on, used 1.7 M trajectories.
+   We have 1,865. Generation is ~13 min per 700 episodes on 12 cores; the GX10's 121 GB is the
+   machine for a dataset this size, not a 64 GB laptop.
+3. **Co-train with real frames.** NVIDIA report +38 % relative from as few as 10 real demos.
+4. A larger backbone or a diffusion policy — last, and only with (1) and (2) done.
+
+**What IS solid and should be kept:** the gripper, the wrist camera, the demo filter, the table
+and the pose-B camera are correctness fixes, not tuning. The expert scores 100 % under the
+evaluator's own test, so the simulator, planner and IK are sound — it is only the learned policy
+that fails. The modular path in `../GAME_PLAN.md` §08 validates against this same simulator.
+
+## 2c. What is left after that
 
 ## 2b. Nothing has ever seen a real camera frame
 
