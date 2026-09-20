@@ -6,7 +6,7 @@ env:
   control_hz: 30
   physics_substeps: 4          # 8 -> 4: ~1.5x faster, contact is still stable at 120 Hz
   episode_steps: 300           # present needs time to reach, grasp, lift AND carry
-  success_distance_m: 0.03     # 2 cm was tight for a 6-DoF arm under a velocity cap
+  success_distance_m: 0.035     # 2 cm was tight for a 6-DoF arm under a velocity cap
 
   # Control / safety envelope
   action_delta_rad: 0.02
@@ -37,10 +37,12 @@ env:
   align_xy_m: 0.035
   align_z_m: 0.05
   approach_contact_penalty: 0.15   # phase 0 must not touch the object
-  open_bonus: 0.10             # phase 0: keep the jaws open while approaching
-  in_position_bonus: 0.30      # phase 1: being lined up is worth holding
+  open_enough: 0.70            # phase 0 jaws must stay at least this open
+  early_close_penalty: 0.15
+  time_penalty: 0.02           # finishing beats loitering
+  in_position_bonus: 0.05      # small: getting there is the point, not staying
   close_bonus: 0.20
-  pinch_bonus: 0.30            # both pads on the object, per step
+  pinch_bonus: 0.10            # both pads on the object, per step
   knock_free_m: 0.10           # contact under this is approach, not batting
   object_lost_m: 0.45          # past this it is gone: end the episode, do not chase
   object_lost_z: -0.05
@@ -74,7 +76,7 @@ env:
   velocity_penalty: 0.002
   velocity_breach_penalty: 1.0
   jerk_penalty: 0.002
-  success_bonus: 5.0
+  success_bonus: 30.0          # must dominate any per-step term
 
 training:
   n_envs: 20                   # 20 cores; measured +68% over the 12-env default

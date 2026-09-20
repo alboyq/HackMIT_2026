@@ -377,9 +377,10 @@ class OpenYAMFeedEnv(gym.Env):
         reward = 10.0 * progress - 0.1 * distance
 
         if phase == 0:
-            # Get there with the jaws open, WITHOUT touching. Closing early pays nothing and
-            # bumping the object costs, so the approach has to be clean.
-            reward += float(self.ecfg["open_bonus"]) * grip_fraction
+            # Approach clean: a COST for closing early or touching, never a per-step reward for
+            # being here. Paying to stay in a phase is how the policy learned to park.
+            if grip_fraction < float(self.ecfg["open_enough"]):
+                reward -= float(self.ecfg["early_close_penalty"])
             if touching:
                 reward -= float(self.ecfg["approach_contact_penalty"])
         elif phase == 1:
@@ -407,6 +408,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.was_pinched = pinched
 
         # ---------------------------------------------------------------- always-on costs
+        # Time costs. Without it, any per-step bonus makes loitering profitable.
+        reward -= float(self.ecfg["time_penalty"])
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()
         reward -= float(self.ecfg["jerk_penalty"]) * np.square(raw - self.prev_action).mean()
         tcp_radius = float(np.linalg.norm(tcp[:2]))
