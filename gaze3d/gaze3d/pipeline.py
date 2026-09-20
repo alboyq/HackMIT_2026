@@ -14,6 +14,7 @@ import numpy as np
 import cv2
 
 from .camera import Camera
+from .pushcam import PushCamera
 from .face import FaceTracker, Intrinsics, estimate_focal_from_distance
 from .normalize import normalize, XGAZE_FACE, vec_to_pitchyaw
 from .models import Ensemble
@@ -23,18 +24,26 @@ from .filters import GazeSmoother
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROFILES = os.path.join(ROOT, "profiles")
 
-DEFAULT_MODELS = ["unigaze_h14_joint", "puregaze_r50", "gazetr_hybrid", "xgaze_resnet18"]
+DEFAULT_MODELS = ["puregaze_r50"]  # Lightweight single model for faster performance
 
 
 class Pipeline:
     def __init__(self, models=None, camera_index=0, width=1920, height=1080, hfov_deg=66.0, tta_flip=True,
-                 fp16=False):
+                 fp16=False, source="camera"):
         self.models = models or DEFAULT_MODELS
         self.camera_index, self.width, self.height = camera_index, width, height
         self.hfov_deg = hfov_deg
         self.tta_flip = tta_flip
         self.fp16 = fp16
-        self.cam: Camera | None = None
+        # "camera": open a local cv2 device, as before (default, unchanged).
+        # "push": don't touch any local device - frames arrive over the network
+        # (see server.py's `/ws` binary-message branch and pushcam.py) and the
+        # only thing this class does differently is which frame-source object
+        # `start()` builds; everything downstream of `self.cam.latest(...)` in
+        # `_loop`/`_step` is identical for both.
+        assert source in ("camera", "push")
+        self.source = source
+        self.cam: Camera | PushCamera | None = None
         self.tracker: FaceTracker | None = None
         self.ens: Ensemble | None = None
         self.geom = ScreenGeometry(1512, 982, 0.1680, (0.0, 18.0))
@@ -65,14 +74,40 @@ class Pipeline:
         self.loaded = True
         self._set(status="models ready", models=self.ens.names, device=str(self.ens.device))
 
-    def start(self):
+    def start(self, width: int | None = None, height: int | None = None):
+        """`width`/`height` only matter for `source == "push"`: the browser
+        (or whatever is pushing frames) declares the resolution it will send
+        so intrinsics can be computed up front, exactly as a local camera's
+        negotiated resolution is known as soon as `cv2.VideoCapture` opens.
+        Ignored for `source == "camera"`, which keeps using the resolution
+        passed to the constructor (the CLI's --width/--height)."""
         if self._run:
             return
         self.load()
-        self._set(status="opening camera")
-        self.cam = Camera(self.camera_index, self.width, self.height).start()
+        if self.source == "push":
+            w = int(width) if width else self.width
+            h = int(height) if height else self.height
+            self._set(status="waiting for pushed frames")
+            self.cam = PushCamera(w, h).start()
+        else:
+            self._set(status="opening camera")
+            self.cam = Camera(self.camera_index, self.width, self.height).start()
         K = Intrinsics.from_hfov(self.cam.width, self.cam.height, self.hfov_deg)
         self.tracker = FaceTracker(K)
+        # Auto-load default calibration profile if it exists (after cam/tracker ready)
+        default_profile = os.path.join(PROFILES, "default.json")
+        print(f"[gaze3d] Checking for default profile at: {default_profile}")
+        print(f"[gaze3d] File exists: {os.path.exists(default_profile)}")
+        if os.path.exists(default_profile):
+            try:
+                self.load_profile("default")
+                print(f"[gaze3d] Auto-loaded calibration! calibrated={self.state.get('calibrated')}")
+            except Exception as e:
+                import traceback
+                print(f"[gaze3d] Failed to auto-load calibration: {e}")
+                traceback.print_exc()
+        else:
+            print(f"[gaze3d] No default profile found, skipping auto-load")
         self._run = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="gaze3d")
         self._thread.start()
@@ -86,6 +121,17 @@ class Pipeline:
         if self.cam:
             self.cam.stop()
         self._set(running=False, status="stopped")
+
+    def push_frame(self, data: bytes) -> bool:
+        """Hand one externally-captured JPEG frame to the active PushCamera.
+        A no-op (returns False) if the pipeline wasn't started in "push" mode
+        or hasn't been started yet - e.g. frames arriving before `start` was
+        acked, or after `stop`. Called directly from the WS handler's receive
+        loop (see server.py), not through the executor, so a frame can never
+        get stuck queued behind a slow command."""
+        if isinstance(self.cam, PushCamera):
+            return self.cam.push(data)
+        return False
 
     def _set(self, **kw):
         with self.lock:

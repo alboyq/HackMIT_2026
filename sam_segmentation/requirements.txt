@@ -1,0 +1,6 @@
+# Installed manually per README, listed here for reference:
+# 1. torch/torchvision with CUDA support (see setup.md)
+# 2. facebookresearch/sam3, installed editable from a local clone (pip install -e .)
+pillow
+numpy
+opencv-python

@@ -55,7 +55,9 @@ def crop():
 def handle(cmd: dict) -> dict:
     c = cmd.get("cmd")
     if c == "start":
-        pipe.start()
+        # width/height only used in --source push (see Pipeline.start's docstring);
+        # a --source camera server ignores them and keeps its CLI-configured resolution.
+        pipe.start(width=cmd.get("width"), height=cmd.get("height"))
         return dict(ok=True)
     if c == "stop":
         pipe.stop()
@@ -114,7 +116,32 @@ async def ws(sock: WebSocket):
     task = asyncio.create_task(pump())
     try:
         while True:
-            msg = json.loads(await sock.receive_text())
+            # A frame pushed from a browser (see gaze3d/pushcam.py) arrives as a
+            # raw binary WS message; every other message is the existing JSON
+            # command protocol. Both share this one receive loop so a client can
+            # freely interleave "arm"/"fit"/etc. with a steady stream of frames.
+            raw = await sock.receive()
+            if raw["type"] == "websocket.disconnect":
+                break
+            data = raw.get("bytes")
+            if data is not None:
+                # Decoded inline, NOT via run_in_executor like commands below:
+                # that executor call is *awaited* right here in this same loop
+                # before the next receive() runs, so a slow/blocking handler
+                # would stall this connection's ability to read the very next
+                # message - including the next pushed frame. A JPEG decode is a
+                # few ms, cheap enough to do directly without that risk. (This
+                # is also why PushCamera.start() itself never blocks - see its
+                # docstring.)
+                try:
+                    pipe.push_frame(data)
+                except Exception:
+                    traceback.print_exc()
+                continue
+            text = raw.get("text")
+            if text is None:
+                continue
+            msg = json.loads(text)
             try:
                 # start/fit/load can take seconds: keep the event loop responsive
                 res = await loop.run_in_executor(None, handle, msg)
@@ -141,13 +168,17 @@ def main():
     ap.add_argument("--camera", type=int, default=0)
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--source", choices=["camera", "push"], default="camera",
+                    help="frame source: a local cv2 device (default), or frames pushed over "
+                         "the /ws WebSocket by a remote client (e.g. a browser with no local "
+                         "camera on this machine) - see gaze3d/pushcam.py")
     ap.add_argument("--hfov", type=float, default=66.0, help="camera horizontal FOV prior; calibration refines the scale")
     ap.add_argument("--preload", action="store_true", help="load models before serving")
     ap.add_argument("--fp16", action="store_true",
                     help="half precision on CUDA/MPS; ~0.05 deg cost, halves VRAM (use on <=6 GB cards)")
     a = ap.parse_args()
     pipe = Pipeline(models=a.models.split(","), camera_index=a.camera, width=a.width, height=a.height,
-                    hfov_deg=a.hfov, tta_flip=not a.no_tta, fp16=a.fp16)
+                    hfov_deg=a.hfov, tta_flip=not a.no_tta, fp16=a.fp16, source=a.source)
     if a.preload:
         pipe.load()
     print(f"gaze3d → http://localhost:{a.port}", flush=True)

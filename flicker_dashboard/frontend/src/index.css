@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+
+  /* Neural ink + mint — a BCI demo, not a zinc SaaS dashboard. */
+  --bg-0: #05060c;
+  --bg-1: #0c1020;
+  --bg-2: #151a30;
+  --border: rgba(140, 160, 255, 0.14);
+  --border-bright: rgba(170, 190, 255, 0.28);
+
+  --text: #c5cbe0;
+  --text-dim: #6e7694;
+  --text-bright: #f3f5ff;
+
+  --accent: #3dffc8;
+  --accent-dim: #3dffc81f;
+  --accent-glow: #3dffc866;
+  --accent-2: #8b9bff;
+
+  --violet: #c4b5fd;
+  --teal: #5eead4;
+  --danger: #fb7185;
+  --good: #4ade80;
+
+  --font-display: "Syne", "Oswald", sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+
+html, body, #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  color: var(--text);
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(ellipse 900px 640px at 12% -10%, rgba(61, 255, 200, 0.09), transparent 55%),
+    radial-gradient(ellipse 1000px 700px at 100% 110%, rgba(139, 155, 255, 0.12), transparent 55%),
+    var(--bg-0);
+  background-attachment: fixed;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+}
+
+.hud-grid {
+  background-image:
+    linear-gradient(rgba(139, 155, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(139, 155, 255, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.panel {
+  background: rgba(12, 16, 32, 0.62);
+  backdrop-filter: blur(18px) saturate(1.35);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 24px 48px -32px rgba(0, 0, 0, 0.9);
+}
+
+.gaze-stage {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(61, 255, 200, 0.06), transparent 28%),
+    radial-gradient(ellipse 80% 70% at 50% 50%, transparent 42%, rgba(5, 6, 12, 0.55) 100%);
+}
+
+.gaze-arena {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 236px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 236px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.gaze-arena-hud {
+  grid-area: 2 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gaze-slot {
+  container-type: size;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gaze-square {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  background: rgba(8, 10, 22, 0.92);
+  border: 2px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.85);
+}
+
+.gaze-square.fill {
+  width: min(90%, 40vw, 34vh);
+  height: min(90%, 40vw, 34vh);
+  justify-self: center;
+  align-self: center;
+}
+
+.gaze-frame-tl,
+.gaze-frame-tr,
+.gaze-frame-bl,
+.gaze-frame-br {
+  position: absolute;
+  z-index: 12;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  border-color: var(--accent);
+  opacity: 0.85;
+}
+.gaze-frame-tl { top: 10px; left: 10px; border-top: 2px solid; border-left: 2px solid; }
+.gaze-frame-tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
+.gaze-frame-bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
+.gaze-frame-br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
+
+.corner-brackets {
+  position: relative;
+}
+.corner-brackets::before,
+.corner-brackets::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+.corner-brackets::before {
+  top: -5px;
+  left: -5px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+}
+.corner-brackets::after {
+  bottom: -5px;
+  right: -5px;
+  border-bottom: 1px solid var(--accent-2);
+  border-right: 1px solid var(--accent-2);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.signal-bars {
+  display: flex;
+  height: 16px;
+  align-items: flex-end;
+  gap: 3px;
+}
+.signal-bar {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-1); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
+
+/* ============ /iris — iris-tracking mode ============ */
+
+.iris-chamber {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(139, 155, 255, 0.08), transparent 32%),
+    radial-gradient(ellipse 80% 70% at 50% 50%, transparent 40%, rgba(5, 6, 12, 0.74) 100%);
+}
+
+.iris-target svg {
+  filter: drop-shadow(0 0 10px rgba(61, 255, 200, 0.22));
+}
+
+.iris-arena {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 320px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.iris-console-slot {
+  grid-area: 2 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.iris-console {
+  width: 280px;
+  max-height: 100%;
+  background: rgba(8, 10, 22, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
+    0 24px 48px -28px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+}
+
+.iris-readout {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 5px;
+  column-gap: 8px;
+  font-family: var(--font-mono);
+}
+.iris-readout dt {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.iris-readout dd {
+  margin: 0;
+  font-size: 11px;
+  text-align: right;
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.iris-reticle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  margin-top: -14px;
+  pointer-events: none;
+  z-index: 15;
+  transition: left 90ms linear, top 90ms linear, opacity 200ms ease;
+}

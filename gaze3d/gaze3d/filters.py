@@ -48,7 +48,8 @@ class OneEuro:
 
 class GazeSmoother:
     """1-Euro + saccade reset + blink hold. Units: screen px, seconds."""
-    def __init__(self, min_cutoff=0.8, beta=0.01, saccade_px_per_s=2500.0):
+    def __init__(self, min_cutoff=2.0, beta=0.08, saccade_px_per_s=2500.0):
+        # Higher min_cutoff & beta = less smoothing = faster response
         self.f = OneEuro(min_cutoff, beta)
         self.saccade_v = saccade_px_per_s
         self.last = None

@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.local
+
+# Build artifacts
+*.log
+*.tmp
+
+# ML models/data (too large)
+*.pth
+*.pt
+*.onnx
+*.bin
+models/*.pth
+
+# SAM checkpoints (huge)
+sam_segmentation/*.pth
+sam_segmentation/checkpoints/
+
+# Cache
+.cache/
+.mediapipe/
