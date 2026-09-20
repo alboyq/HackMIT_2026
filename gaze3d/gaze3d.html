@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gaze3d — GPU eye tracking bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/bench.css">
+<link rel="stylesheet" href="css/gaze3d.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead__id">
+    <span class="masthead__ret" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4.5"/><path d="M12 0v5M12 19v5M0 12h5M19 12h5"/></svg>
+    </span>
+    <span>gaze3d</span>
+    <span class="masthead__sub" id="mastSub">GPU appearance-based · 3D ray mapping</span>
+  </div>
+  <div class="pill" id="pill" data-state="off">
+    <i class="pill__dot"></i><span id="pillText">server off</span>
+  </div>
+</header>
+
+<main class="bench">
+  <aside class="rail">
+    <ol class="phases" id="phases">
+      <li class="phase" data-phase="camera" data-status="pending">
+        <b class="phase__no">01</b><span class="phase__name">Camera</span><span class="phase__read" data-read>off</span>
+      </li>
+      <li class="phase" data-phase="calibrate" data-status="locked">
+        <b class="phase__no">02</b><span class="phase__name">Calibrate</span><span class="phase__read" data-read>—</span>
+      </li>
+      <li class="phase" data-phase="measure" data-status="locked">
+        <b class="phase__no">03</b><span class="phase__name">Measure</span><span class="phase__read" data-read>—</span>
+      </li>
+      <li class="phase" data-phase="report" data-status="locked">
+        <b class="phase__no">04</b><span class="phase__name">Report</span><span class="phase__read" data-read>—</span>
+      </li>
+    </ol>
+
+    <section class="block">
+      <h2 class="block__h">Live signal</h2>
+      <dl class="readout">
+        <div><dt>gaze x</dt><dd id="roX">—</dd></div>
+        <div><dt>gaze y</dt><dd id="roY">—</dd></div>
+        <div><dt>rate</dt><dd id="roHz">—<small>Hz</small></dd></div>
+        <div><dt>gpu</dt><dd id="roGpu">—<small>ms</small></dd></div>
+        <div><dt>head yaw · pitch</dt><dd id="roHead">—</dd></div>
+        <div><dt>distance</dt><dd id="roDist">—<small>cm</small></dd></div>
+        <div><dt>ensemble spread</dt><dd id="roAgree">—<small>°</small></dd></div>
+        <div><dt>state</dt><dd id="roState">—</dd></div>
+      </dl>
+      <div class="camslot camslot--g3" id="camslot">
+        <p class="camslot__idle">Camera preview appears here once the server has the camera.</p>
+      </div>
+      <div class="cropslot" id="cropslot" hidden>
+        <img id="cropImg" alt="normalised face crop">
+        <span>normalised 224² input</span>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2 class="block__h">Viewing geometry</h2>
+      <p class="block__note">The 3D mapping needs the real screen. Diagonal sets pixel pitch. Viewing distance is measured from the face and refined by calibration — nothing to type.</p>
+      <label class="field"><span>Screen diagonal</span>
+        <input type="number" id="inDiag" value="14.2" min="7" max="60" step="0.1"><i>in</i></label>
+      <label class="field"><span>Camera below top edge</span>
+        <input type="number" id="inCamY" value="18" min="-400" max="400" step="1"><i>px</i></label>
+      <dl class="readout readout--tight">
+        <div><dt>panel</dt><dd id="roNative">—</dd></div>
+        <div><dt>scale</dt><dd id="roPxCm">—<small>px/cm</small></dd></div>
+        <div><dt>1° of angle</dt><dd id="roDegPx">—<small>px</small></dd></div>
+        <div><dt>eye to screen (PnP)</dt><dd id="roDistCal">—<small>cm</small></dd></div>
+        <div><dt>camera focal</dt><dd id="roFocal">—<small>px</small></dd></div>
+      </dl>
+    </section>
+
+    <section class="block">
+      <h2 class="block__h">Protocol</h2>
+      <label class="field field--sel"><span>Calibration</span>
+        <select id="inCalib">
+          <option value="9m" selected>9 points + 10 head-motion trials</option>
+          <option value="13m">13 points + 15 head-motion trials</option>
+          <option value="9">9 points, still head</option>
+          <option value="13">13 points, still head</option>
+          <option value="5m">5 points + 5 head-motion trials, quick</option>
+        </select></label>
+      <label class="field field--sel"><span>Validation</span>
+        <select id="inValid">
+          <option value="13" selected>13 points, incl. corners</option>
+          <option value="9">9 points</option>
+          <option value="5">5 points, quick</option>
+        </select></label>
+      <label class="check"><input type="checkbox" id="inFull" checked>
+        <span>Fullscreen runs<i>Puts the chamber on the whole display so screen and viewport coordinates coincide.</i></span></label>
+      <label class="check"><input type="checkbox" id="inSmooth" checked>
+        <span>1€ smoothing<i>Low-lag filter with saccade reset. Off = raw per-frame estimate.</i></span></label>
+      <div class="actions actions--tight">
+        <button class="btn btn--sm" id="btnSave" disabled>Save profile</button>
+        <button class="btn btn--sm" id="btnLoad">Load profile</button>
+      </div>
+    </section>
+
+    <section class="block" id="calibBlock" hidden>
+      <h2 class="block__h">Calibration fit</h2>
+      <ul class="models" id="calibList"></ul>
+    </section>
+
+    <section class="block" id="modelsBlock" hidden>
+      <h2 class="block__h">Models on GPU</h2>
+      <ul class="models" id="modelsList"></ul>
+    </section>
+  </aside>
+
+  <section class="stage" id="stage">
+    <article class="view view--intro" data-view="intro">
+      <div class="intro__copy">
+        <p class="eyebrow">Webcam eye tracking · no compromises</p>
+        <h1 class="display">Appearance nets on the GPU,<br>a <em>3D ray</em> to the screen</h1>
+        <p class="lede">An ensemble of ETH-XGaze-trained gaze networks (UniGaze ViT-H, PureGaze, GazeTR, ResNet-18)
+          predicts a 3D gaze direction from a head-pose-normalised face crop. A PnP head pose turns that into a ray
+          from your face, intersected with the physical screen plane, then a short person-specific calibration fits
+          the residual geometry — so the mapping survives head movement instead of memorising one pose.</p>
+        <button class="btn btn--go" id="btnStart">Start camera</button>
+        <p class="fineprint" id="startNote">Inference runs in a local Python process on Apple Silicon (Metal). First start loads ~3 GB of weights.</p>
+      </div>
+      <figure class="geo">
+        <svg class="geo__svg" viewBox="0 0 480 200" aria-hidden="true">
+          <defs><clipPath id="wedgeClip"><rect x="0" y="0" width="480" height="200"/></clipPath></defs>
+          <g clip-path="url(#wedgeClip)">
+            <polygon id="geoWedge" class="geo__wedge" points="44,100 400,40 400,160"/>
+            <line id="geoAxis" class="geo__axis" x1="44" y1="100" x2="400" y2="100"/>
+            <line id="geoScreen" class="geo__screen" x1="400" y1="30" x2="400" y2="170"/>
+            <g class="geo__eye" transform="translate(44 100)">
+              <path d="M-13 0c5-7 10-10 13-10s8 3 13 10c-5 7-10 10-13 10S-8 7-13 0z"/>
+              <circle cx="0" cy="0" r="3.6"/>
+            </g>
+            <text id="geoDist" class="geo__label" x="222" y="118" text-anchor="middle">55 cm</text>
+            <text id="geoSpan" class="geo__label geo__label--acc" x="410" y="100" dominant-baseline="middle">31°</text>
+          </g>
+        </svg>
+        <figcaption>Drawn to scale from your inputs. The wedge is the angle your screen subtends at the eye.</figcaption>
+      </figure>
+    </article>
+
+    <article class="view view--camera" data-view="camera" hidden>
+      <p class="eyebrow">Phase 01</p>
+      <h2 class="display display--sm">Sit the way you will <em>use</em> it,<br>then calibrate</h2>
+      <ol class="steps">
+        <li><b>Sit at your normal distance.</b> Depth comes from the face model and the camera's field of view; the calibration's head-motion targets refine that scale, so nothing has to be typed.</li>
+        <li><b>Front light, no Center Stage.</b> Turn off Center Stage in Control Center — it crops the camera dynamically and would silently change the intrinsics mid-run.</li>
+        <li><b>Head motion is welcome.</b> Some calibration targets ask you to keep fixating while turning and leaning — that is what teaches the mapping to hold up when you move later.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn btn--go" id="btnCalib">Calibrate<span class="btn__k">9 points + 10 moving</span></button>
+        <button class="btn" id="btnFreeEarly">Look around first</button>
+        <button class="btn" id="btnRecover" hidden>Recover last calibration<span class="btn__k"></span></button>
+      </div>
+      <p class="fineprint" id="camNote">Before calibration the marker uses the prior geometry only — camera at top centre, no personal offset. Expect it to be off by a few degrees.</p>
+    </article>
+
+    <article class="view view--report" data-view="report" hidden>
+      <header class="report__head">
+        <div>
+          <p class="eyebrow">Phase 04 · <span id="repStamp">—</span></p>
+          <h2 class="display display--sm">The measurement</h2>
+        </div>
+        <div class="report__acts">
+          <button class="btn btn--sm" id="btnCsv">Export CSV</button>
+          <button class="btn btn--sm" id="btnJson">Export JSON</button>
+        </div>
+      </header>
+
+      <div class="verdict" id="verdict">
+        <div class="verdict__num"><b id="vAcc">—</b><span>°</span><em>mean error</em></div>
+        <div class="verdict__num"><b id="vAccPx">—</b><span>px</span><em>same, in pixels</em></div>
+        <div class="verdict__num"><b id="vWorst">—</b><span>°</span><em>worst point</em></div>
+        <div class="verdict__num"><b id="vHz">—</b><span>Hz</span><em>sample rate</em></div>
+        <p class="verdict__read" id="vRead">—</p>
+      </div>
+
+      <figure class="plot">
+        <figcaption class="plot__cap">
+          <b>Field plot</b>
+          <span class="key"><i class="key__t"></i>target</span>
+          <span class="key"><i class="key__s"></i>samples</span>
+          <span class="key"><i class="key__e"></i>offset</span>
+        </figcaption>
+        <canvas id="plot" width="900" height="560"></canvas>
+        <p class="plot__note">Your screen, to scale. Each ring is the mean error at that target.</p>
+      </figure>
+
+      <div class="report__grid">
+        <section class="tbl">
+          <h3 class="block__h">Error by screen third</h3>
+          <table id="tblRegion"><tbody></tbody></table>
+        </section>
+        <section class="tbl">
+          <h3 class="block__h">Signal quality</h3>
+          <table id="tblQual"><tbody></tbody></table>
+        </section>
+      </div>
+
+      <section class="tbl tbl--wide">
+        <h3 class="block__h">Per target</h3>
+        <div class="tbl__scroll"><table id="tblPoints"></table></div>
+      </section>
+
+      <section class="tbl tbl--wide" id="calibOut" hidden>
+        <h3 class="block__h">Calibration fit</h3>
+        <p class="block__note" id="calibNote"></p>
+        <div class="tbl__scroll"><table id="tblCalib"></table></div>
+      </section>
+
+      <section class="runs" id="runs" hidden>
+        <h3 class="block__h">Since calibration</h3>
+        <p class="block__note">Re-measuring after moving shows how well the mapping holds across head poses.</p>
+        <ol class="runs__list" id="runsList"></ol>
+      </section>
+
+      <div class="actions">
+        <button class="btn btn--go" id="btnRemeasure">Measure again</button>
+        <button class="btn" id="btnRobust">Head-motion test</button>
+        <button class="btn" id="btnFree">Live view</button>
+        <button class="btn" id="btnGrid">Tile hit test</button>
+        <button class="btn" id="btnRecal">Recalibrate</button>
+      </div>
+    </article>
+  </section>
+</main>
+
+<div class="chamber" id="chamber" hidden>
+  <canvas class="chamber__heat" id="heat"></canvas>
+  <div class="chamber__grid" id="chamberGrid" hidden></div>
+  <div class="target" id="target" hidden>
+    <svg viewBox="0 0 120 120">
+      <circle class="target__ring" id="targetRing" cx="60" cy="60" r="50"/>
+      <path class="target__cross" d="M60 44v32M44 60h32"/>
+      <circle class="target__dot" cx="60" cy="60" r="4"/>
+    </svg>
+  </div>
+  <div class="motion" id="motion" hidden>
+    <b id="motionCue">turn your head slowly left and right</b>
+    <i id="motionBar"></i>
+  </div>
+  <p class="chamber__hud" id="chamberHud"></p>
+  <p class="chamber__esc">esc to leave<span id="chamberKeys"></span></p>
+  <canvas class="gazelayer gazelayer--in" id="gazelayer"></canvas>
+</div>
+
+<script type="module" src="js/gaze3d.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+{
+  "what": "gravity + friction feed-forward correction for the real OpenYAM, fitted to the torques its own motors delivered (runs 2-6, 2026-09-20); nothing weighed or measured by hand",
+  "base_model": "mujoco_menagerie/i2rt_yam/yam.xml with body_gravcomp zeroed (the sim's own model)",
+  "convention": "feed-forward torque_j = factor_j * qfrc_bias_j(q) + coulomb_j * tanh(v_cmd_j / 0.02);  torques in the units of the MIT command (what the motor is TOLD to output)",
+  "factor": [
+    1.0,
+    1.375,
+    1.375,
+    1.111,
+    1.0,
+    1.0
+  ],
+  "coulomb_Nm": [
+    0.76,
+    0.69,
+    1.89,
+    0.14,
+    0.06,
+    0.06
+  ],
+  "factor_per_joint_alternative": [
+    1.0,
+    1.368,
+    1.375,
+    1.111,
+    1.0,
+    1.0
+  ],
+  "extra_weight_alternative": {
+    "link_4_extra_mass_kg": 1.053,
+    "link_4_mass_moment_kg_m": [
+      -0.0036,
+      -0.0052,
+      -0.0
+    ]
+  },
+  "max_disagreement_between_structures_at_taught_poses_Nm": 0.56,
+  "friction_note": "J3 static band is about +-2 N.m (stick-slip: the elbow sat still while torque swung 11.2 -> 7.0). Coulomb value is the fitted half-width.",
+  "data_coverage": "runs 4,5 (elbow 0.03..0.18 rad) and run 6 (elbow up to 0.94 rad, shoulder up to 1.21, wrist -0.74..1.6). Elbow bent beyond ~1 rad is still extrapolation.",
+  "fit_cost_vs_stock": {
+    "stock_model": 45793,
+    "chosen": 6404
+  },
+  "fitted": "2026-09-20 02:57"
+}

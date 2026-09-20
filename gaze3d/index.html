@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gaze Accuracy Bench — WebGazer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/bench.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead__id">
+    <span class="masthead__ret" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4.5"/><path d="M12 0v5M12 19v5M0 12h5M19 12h5"/></svg>
+    </span>
+    <span>Gaze Accuracy Bench</span>
+    <span class="masthead__sub">webgazer 3.3.0</span>
+  </div>
+  <div class="pill" id="pill" data-state="off">
+    <i class="pill__dot"></i><span id="pillText">camera off</span>
+  </div>
+</header>
+
+<main class="bench">
+  <!-- ─────────────────────────── control rail ─────────────────────────── -->
+  <aside class="rail">
+    <ol class="phases" id="phases">
+      <li class="phase" data-phase="camera" data-status="pending">
+        <b class="phase__no">01</b>
+        <span class="phase__name">Camera</span>
+        <span class="phase__read" data-read>off</span>
+      </li>
+      <li class="phase" data-phase="calibrate" data-status="locked">
+        <b class="phase__no">02</b>
+        <span class="phase__name">Calibrate</span>
+        <span class="phase__read" data-read>—</span>
+      </li>
+      <li class="phase" data-phase="measure" data-status="locked">
+        <b class="phase__no">03</b>
+        <span class="phase__name">Measure</span>
+        <span class="phase__read" data-read>—</span>
+      </li>
+      <li class="phase" data-phase="report" data-status="locked">
+        <b class="phase__no">04</b>
+        <span class="phase__name">Report</span>
+        <span class="phase__read" data-read>—</span>
+      </li>
+    </ol>
+
+    <section class="block">
+      <h2 class="block__h">Live signal</h2>
+      <dl class="readout">
+        <div><dt>gaze x</dt><dd id="roX">—</dd></div>
+        <div><dt>gaze y</dt><dd id="roY">—</dd></div>
+        <div><dt>rate</dt><dd id="roHz">—<small>Hz</small></dd></div>
+        <div><dt>signal</dt><dd id="roLoss">—<small>%</small></dd></div>
+      </dl>
+      <div class="camslot" id="camslot">
+        <p class="camslot__idle">Camera preview appears here. Fill the box with your face, then hold still.</p>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2 class="block__h">Viewing geometry</h2>
+      <p class="block__note">Degrees of visual angle need your physical setup. Estimates until you measure.</p>
+      <label class="field"><span>Eye to screen</span>
+        <input type="number" id="inDist" value="60" min="20" max="150" step="1"><i>cm</i></label>
+      <label class="field"><span>Screen diagonal</span>
+        <input type="number" id="inDiag" value="15.4" min="7" max="60" step="0.1"><i>in</i></label>
+      <dl class="readout readout--tight">
+        <div><dt>panel</dt><dd id="roNative">—</dd></div>
+        <div><dt>scale</dt><dd id="roPxCm">—<small>px/cm</small></dd></div>
+        <div><dt>1° of angle</dt><dd id="roDegPx">—<small>px</small></dd></div>
+      </dl>
+      <p class="block__note">Pixel errors are exact either way. Degrees are only as good as the
+        diagonal you enter for that panel.</p>
+    </section>
+
+    <section class="block">
+      <h2 class="block__h">Protocol</h2>
+      <label class="field field--sel"><span>Calibration</span>
+        <select id="inCalib">
+          <option value="9" selected>9 points</option>
+          <option value="13">13 points</option>
+          <option value="5">5 points</option>
+        </select></label>
+      <label class="field field--sel"><span>Validation</span>
+        <select id="inValid">
+          <option value="13" selected>13 points, incl. corners</option>
+          <option value="9">9 points</option>
+          <option value="5">5 points, quick</option>
+        </select></label>
+      <label class="field field--sel"><span>Regression</span>
+        <select id="inReg">
+          <option value="ridge" selected>ridge</option>
+          <option value="weightedRidge">weighted ridge</option>
+          <option value="threadedRidge">threaded ridge</option>
+        </select></label>
+      <label class="check"><input type="checkbox" id="inKalman" checked>
+        <span>Kalman filter<i>Smooths the prediction. Lowers noise, adds lag.</i></span></label>
+      <label class="check"><input type="checkbox" id="inLock" checked>
+        <span>Ignore stray clicks<i>WebGazer trains on every click by default, which quietly corrupts a measurement run.</i></span></label>
+    </section>
+  </aside>
+
+  <!-- ───────────────────────────── work stage ─────────────────────────── -->
+  <section class="stage" id="stage">
+
+    <!-- view: opening -->
+    <article class="view view--intro" data-view="intro">
+      <div class="intro__copy">
+        <p class="eyebrow">Webcam eye tracking, measured</p>
+        <h1 class="display">How closely does it<br><em>actually</em> follow your eyes?</h1>
+        <p class="lede">WebGazer infers gaze from a webcam with no special hardware. This bench calibrates it,
+          then measures the error against known targets and reports it in degrees of visual angle — the same
+          unit a research eye tracker is specified in.</p>
+        <button class="btn btn--go" id="btnStart">Start camera</button>
+        <p class="fineprint" id="startNote">Needs webcam permission. Nothing leaves this machine — inference runs in the page.</p>
+      </div>
+
+      <figure class="geo">
+        <svg class="geo__svg" viewBox="0 0 480 200" aria-hidden="true">
+          <defs><clipPath id="wedgeClip"><rect x="0" y="0" width="480" height="200"/></clipPath></defs>
+          <g clip-path="url(#wedgeClip)">
+            <polygon id="geoWedge" class="geo__wedge" points="44,100 400,40 400,160"/>
+            <line id="geoAxis" class="geo__axis" x1="44" y1="100" x2="400" y2="100"/>
+            <line id="geoScreen" class="geo__screen" x1="400" y1="30" x2="400" y2="170"/>
+            <g class="geo__eye" transform="translate(44 100)">
+              <path d="M-13 0c5-7 10-10 13-10s8 3 13 10c-5 7-10 10-13 10S-8 7-13 0z"/>
+              <circle cx="0" cy="0" r="3.6"/>
+            </g>
+            <text id="geoDist" class="geo__label" x="222" y="118" text-anchor="middle">60 cm</text>
+            <text id="geoSpan" class="geo__label geo__label--acc" x="410" y="100" dominant-baseline="middle">31°</text>
+          </g>
+        </svg>
+        <figcaption>Drawn to scale from your inputs. The wedge is the angle your screen subtends at the eye.</figcaption>
+      </figure>
+    </article>
+
+    <!-- view: camera check -->
+    <article class="view view--camera" data-view="camera" hidden>
+      <p class="eyebrow">Phase 01</p>
+      <h2 class="display display--sm">Set the camera up<br>the way you will <em>use</em> it</h2>
+      <ol class="steps">
+        <li><b>Sit as you normally would</b> and set the distance above to match. Every angle in the report scales off it.</li>
+        <li><b>Light your face from the front.</b> A window behind you turns your face into a silhouette and tracking collapses.</li>
+        <li><b>Fill the feedback box</b> in the preview, then keep your head still. WebGazer has no head-pose compensation — a 2 cm shift after calibration shows up as error.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn btn--go" id="btnCalib">Calibrate<span class="btn__k">9 points</span></button>
+        <button class="btn" id="btnFreeEarly">Look around first</button>
+      </div>
+      <p class="fineprint">Calibration teaches the model your eyes. It has to happen before any prediction is meaningful.</p>
+    </article>
+
+    <!-- view: report -->
+    <article class="view view--report" data-view="report" hidden>
+      <header class="report__head">
+        <div>
+          <p class="eyebrow">Phase 04 · <span id="repStamp">—</span></p>
+          <h2 class="display display--sm">The measurement</h2>
+        </div>
+        <div class="report__acts">
+          <button class="btn btn--sm" id="btnCsv">Export CSV</button>
+          <button class="btn btn--sm" id="btnJson">Export JSON</button>
+        </div>
+      </header>
+
+      <div class="verdict" id="verdict">
+        <div class="verdict__num">
+          <b id="vAcc">—</b><span>°</span>
+          <em>mean error</em>
+        </div>
+        <div class="verdict__num">
+          <b id="vAccPx">—</b><span>px</span>
+          <em>same, in pixels</em>
+        </div>
+        <div class="verdict__num">
+          <b id="vWorst">—</b><span>°</span>
+          <em>worst point</em>
+        </div>
+        <div class="verdict__num">
+          <b id="vHz">—</b><span>Hz</span>
+          <em>sample rate</em>
+        </div>
+        <p class="verdict__read" id="vRead">—</p>
+      </div>
+
+      <figure class="plot">
+        <figcaption class="plot__cap">
+          <b>Field plot</b>
+          <span class="key"><i class="key__t"></i>target</span>
+          <span class="key"><i class="key__s"></i>samples</span>
+          <span class="key"><i class="key__e"></i>offset</span>
+        </figcaption>
+        <canvas id="plot" width="900" height="560"></canvas>
+        <p class="plot__note">Your screen, to scale. Each ring is the mean error at that target — the radius is the
+          distance a prediction is typically off by there.</p>
+      </figure>
+
+      <div class="report__grid">
+        <section class="tbl">
+          <h3 class="block__h">Error by screen third</h3>
+          <table id="tblRegion"><tbody></tbody></table>
+        </section>
+        <section class="tbl">
+          <h3 class="block__h">Signal quality</h3>
+          <table id="tblQual"><tbody></tbody></table>
+        </section>
+      </div>
+
+      <section class="tbl tbl--wide">
+        <h3 class="block__h">Per target</h3>
+        <div class="tbl__scroll"><table id="tblPoints"></table></div>
+      </section>
+
+      <section class="runs" id="runs" hidden>
+        <h3 class="block__h">Since calibration</h3>
+        <p class="block__note">Re-measuring without recalibrating shows how fast the model drifts as you shift in your seat.</p>
+        <ol class="runs__list" id="runsList"></ol>
+      </section>
+
+      <div class="actions">
+        <button class="btn btn--go" id="btnRemeasure">Measure again</button>
+        <button class="btn" id="btnFree">Live view</button>
+        <button class="btn" id="btnGrid">Tile hit test</button>
+        <button class="btn" id="btnRecal">Recalibrate</button>
+      </div>
+    </article>
+  </section>
+</main>
+
+<!-- ──────────────────── fullscreen measurement chamber ──────────────────── -->
+<div class="chamber" id="chamber" hidden>
+  <canvas class="chamber__heat" id="heat"></canvas>
+  <div class="chamber__grid" id="chamberGrid" hidden></div>
+  <div class="target" id="target" hidden>
+    <svg viewBox="0 0 120 120">
+      <circle class="target__ring" id="targetRing" cx="60" cy="60" r="50"/>
+      <path class="target__cross" d="M60 44v32M44 60h32"/>
+      <circle class="target__dot" cx="60" cy="60" r="4"/>
+    </svg>
+  </div>
+  <p class="chamber__hud" id="chamberHud"></p>
+  <p class="chamber__esc">esc to leave<span id="chamberKeys"></span></p>
+</div>
+
+<canvas class="gazelayer" id="gazelayer"></canvas>
+
+<script src="vendor/webgazer.js"></script>
+<script type="module" src="js/bench.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+[01:32:57] recorded pose '5' (2026-09-19 23:56:59): [-1.9518, -5.3336, -6.0241, -0.2916, 0.1761, 0.1089]  laps [0, 1, 1, 0, 0, 0]
+[01:32:57] bus can0 via socketcan, state=BusState.ACTIVE
+[01:32:57] watchdog OFF on all six
+[01:32:57] measured pose: [-1.5414, -6.2789, -6.2739, 1.6577, 0.0086, 0.001]
+[01:32:57] target       : [-1.7876, -5.7117, -6.124, 0.4881, 0.1091, 0.0657]   (fraction 0.6)
+[01:32:57] travel       : j1:-0.246  j2:+0.567  j3:+0.150  j4:-1.170  j5:+0.100  j6:+0.065
+[01:32:57] furthest     : 1.170 rad -> 7.3s at peak 0.25 rad/s, then hold 5.0s and ramp back
+[01:32:57] feed-forward torque N.m  at start:  +0.0  +3.9  +6.0  -0.4  -0.0  +0.0
+           at target:  +0.0  -0.0  +9.2  +1.7  -0.0  -0.0  |  peak along the path:  0.0  3.9  9.2  1.7  0.0  0.0
+[01:32:57] torque budget (0.4 x TMAX) N.m: 11.2 11.2 11.2  4.0  4.0  4.0   factors [1.  1.1 1.4 1.  1.  1. ]
+[01:32:57] session check OK, travel guard OK
+[01:32:57] dry run: nothing enabled, nothing moved

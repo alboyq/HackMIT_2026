@@ -1,0 +1,30 @@
+=== jar_act_v2  Fri Sep 18 01:49:52 PDT 2026  calib=/Users/adipu/so101Sim/rl/real/camera_calib_side_recommended.json bg=/Users/adipu/so101Sim/rl/real/bg episodes=600 steps=40000 BATCH=16 JAR_ZONE=0.30 0.42 -0.5 0.5 KP_SCALE=0.1 1.0 JAR_FRICTION=0.35-0.7 SIDE_ZFRAC=0.58
+DONE 638/656 episodes kept, 127908 frames, 355s -> /Users/adipu/so101Sim/rl/runs/jar_act_v2/demos
+training finished Fri Sep 18 03:13:30 PDT 2026: done
+ACT jar step_10000 na25_preal0.5: 22/48 = 46% (mean max rise 0.049 m, 41s)
+ACT jar step_15000 na25_preal0.5: 32/48 = 67% (mean max rise 0.070 m, 38s)
+ACT jar step_20000 na25_preal0.5: 21/48 = 44% (mean max rise 0.049 m, 39s)
+ACT jar step_25000 na25_preal0.5: 27/48 = 56% (mean max rise 0.059 m, 37s)
+ACT jar step_30000 na25_preal0.5: 28/48 = 58% (mean max rise 0.060 m, 37s)
+ACT jar step_35000 na25_preal0.5: 27/48 = 56% (mean max rise 0.060 m, 37s)
+ACT jar step_40000 na25_preal0.5: 22/48 = 46% (mean max rise 0.049 m, 37s)
+ACT jar step_5000 na25_preal0.5: 25/48 = 52% (mean max rise 0.050 m, 37s)
+best checkpoint: /Users/adipu/so101Sim/rl/runs/jar_act_v2/act/step_15000 (32/48)
+ACT jar step_15000 na12_preal0.5: 19/48 = 40% (mean max rise 0.044 m, 40s)
+ACT jar step_15000 na50_preal0.5: 30/48 = 62% (mean max rise 0.068 m, 34s)
+-- best checkpoint, real-kitchen backgrounds only:
+ACT jar step_15000 na25_preal1.0: 69/96 = 72% (mean max rise 0.075 m, 65s)
+-- best checkpoint, random never-the-kitchen backgrounds only:
+ACT jar step_15000 na25_preal0.0: 53/96 = 55% (mean max rise 0.060 m, 69s)
+=== chain done Fri Sep 18 03:22:02 PDT 2026
+=== DAgger round dagger1 from /Users/adipu/so101Sim/rl/runs/jar_act_v2/act/step_15000  Fri Sep 18 03:30:03 PDT 2026
+DAGGER 180/292 policy successes during collection, 50966 labelled frames, 144s -> /Users/adipu/so101Sim/rl/runs/jar_act_v2/dagger1/data
+training finished Fri Sep 18 04:11:44 PDT 2026: done
+ACT jar step_10000 na25_preal0.5: 30/48 = 62% (mean max rise 0.063 m, 38s)
+ACT jar step_15000 na25_preal0.5: 25/48 = 52% (mean max rise 0.056 m, 37s)
+ACT jar step_20000 na25_preal0.5: 25/48 = 52% (mean max rise 0.057 m, 37s)
+ACT jar step_5000 na25_preal0.5: 25/48 = 52% (mean max rise 0.054 m, 36s)
+best checkpoint: /Users/adipu/so101Sim/rl/runs/jar_act_v2/dagger1/act/step_10000 (30/48)
+-- best checkpoint, real-kitchen backgrounds only, 96 fresh seeds:
+ACT jar step_10000 na25_preal1.0: 60/96 = 62% (mean max rise 0.064 m, 65s)
+=== round dagger1 done Fri Sep 18 04:15:19 PDT 2026

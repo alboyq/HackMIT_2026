@@ -47,6 +47,8 @@ sam_segmentation/checkpoints/
 Monod model.mdl
 herald/
 iitb_ai_pipeline/
+HANDOFF_PRD.md.local-backup
+HANDOFF_PRD.md.local-backup-wip
 
 # Nested clones kept on disk but not tracked as gitlinks
 gaze3d_src/

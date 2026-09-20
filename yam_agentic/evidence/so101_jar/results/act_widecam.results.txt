@@ -1,0 +1,13 @@
+step_2500  ACT jar step_2500 na25_preal0.5_cj0.15: 22/48 = 46% (mean max rise 0.041 m, 79s)
+step_5000  ACT jar step_5000 na25_preal0.5_cj0.15: 12/48 = 25% (mean max rise 0.028 m, 74s)
+step_7500  ACT jar step_7500 na25_preal0.5_cj0.15: 21/48 = 44% (mean max rise 0.049 m, 893s)
+step_10000  ACT jar step_10000 na25_preal0.5_cj0.15: 35/48 = 73% (mean max rise 0.075 m, 10042s)
+step_12500  ACT jar step_12500 na25_preal0.5_cj0.15: 16/48 = 33% (mean max rise 0.037 m, 79s)
+step_15000  ACT jar step_15000 na25_preal0.5_cj0.15: 31/48 = 65% (mean max rise 0.068 m, 42s)
+=== camera-robustness curve, step_10000 (trained with +-15 cm camera randomisation) ===
+  camera offset +-0.0 m: ACT jar step_10000 na25_preal0.5_cj0.0: 32/48 = 67% (mean max rise 0.068 m, 43s)
+  camera offset +-0.04 m: ACT jar step_10000 na25_preal0.5: 27/48 = 56% (mean max rise 0.061 m, 42s)
+  camera offset +-0.10 m: ACT jar step_10000 na25_preal0.5_cj0.1: 33/48 = 69% (mean max rise 0.070 m, 42s)
+  camera offset +-0.15 m: ACT jar step_10000 na25_preal0.5_cj0.15: 23/48 = 48% (mean max rise 0.051 m, 44s)
+  camera offset +-0.20 m: ACT jar step_10000 na25_preal0.5_cj0.2: 29/48 = 60% (mean max rise 0.062 m, 42s)
+=== done Sat Sep 19 10:58:52 EDT 2026 ===

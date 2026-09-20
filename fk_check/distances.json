@@ -1,0 +1,16 @@
+{
+  "unit": "mm",
+  "note": "ruler distances between pen dots on the re-mounted rig (attempt 2); dot = point between the closed pads; ruler readings, dots ~3 mm radius so each distance is good to roughly +/-3-5 mm; 3-4 was added up from two caliper segments (~+/-5-8 mm, and assumes the two segments lie on one straight line); 2-5 (156+68) and 3-5 (156+87) are sums of two segments, user flagged them as probably inaccurate",
+  "pairs": {
+    "1-2": 156,
+    "1-3": 131,
+    "2-3": 140,
+    "1-4": 141,
+    "2-4": 149,
+    "3-4": 231,
+    "1-5": 112,
+    "4-5": 112,
+    "2-5": 224,
+    "3-5": 243
+  }
+}
