@@ -36,7 +36,18 @@ def worker(a):
     from yam_expert import STAGING, Expert
     policy = ACTPolicy.from_pretrained(ckpt)
     policy.to("cpu").eval()
-    if na:
+    # ACT's published inference uses temporal ensembling (exponential weighting over the
+    # overlapping chunks); LeRobot defaults it OFF, which leaves n_action_steps executed blind.
+    # YAM_TE=0.01 is the paper's coefficient. It requires querying the policy every tick.
+    te = float(os.environ.get("YAM_TE", "0") or 0)
+    if te > 0:
+        from lerobot.policies.act.modeling_act import ACTTemporalEnsembler
+        policy.config.temporal_ensemble_coeff = te
+        policy.config.n_action_steps = 1
+        # the ensembler is built in ACTPolicy.__init__, so a checkpoint loaded without it has
+        # none — construct it here rather than rebuilding the policy
+        policy.temporal_ensembler = ACTTemporalEnsembler(te, policy.config.chunk_size)
+    elif na:
         policy.config.n_action_steps = na
     sc = DataScene(bg_dir=bg, aug=aug)
     ex = Expert(sc)                                                    # only for FK and the staging geometry

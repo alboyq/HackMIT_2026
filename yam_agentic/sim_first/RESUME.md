@@ -9,11 +9,11 @@ Nothing. Both machines checkpoint continuously:
 
 | Thing | Where it lives | Lost on unplug |
 |---|---|---|
-| Demonstration datasets (npz shards) | GX10 `~/yam_simfirst/runs/*/demos`, Mac `rl/runs/*/demos` | nothing — written once, reread on restart |
+| Demonstration datasets (npz shards) | `<run>/demos` wherever you generated them (GX10 `~/yam_simfirst/runs/`, or a Mac checkout). Too large for the repo. | nothing — written once, reread on restart |
 | Training | checkpoint + optimiser state + RNG every 1000 steps, plus an `act/LATEST` pointer | at most 1000 steps (~2 min on the GX10) |
 | Closed-loop eval results | appended to `runs/<run>/results.txt` as each finishes | the one in flight |
 | Code | this repo | nothing, once pushed |
-| Background photo pools | GX10 `bg_train/`, `bg_heldout/full/`; Mac `rl/yam/bg_train`, `rl/jar/bg_heldout` | re-fetchable: `bg_heldout/fetch.sh`, and `bg_train` is the same trick with seeds `yamtrain1..800` |
+| Background photo pools | `bg_train/`, `bg_heldout/full/` beside the sim. Not in the repo (800+ photos). | re-fetchable: [`bg_heldout/fetch.sh`](../evidence/so101_jar/bg_heldout/fetch.sh), and `bg_train` is the same trick with seeds `yamtrain1..800` |
 
 If you have a spare minute before pulling power, `touch` nothing — just pull it. The trainer
 writes checkpoints atomically enough that a half-written one simply fails the `model.safetensors`
@@ -37,8 +37,8 @@ tail -f runs/yam_g1/train.log  # expect "RESUMED from step_N"
 **Mac** (sim development, and a second training pipeline if wanted):
 
 ```bash
-cd ~/so101Sim
-rl/yam/run_chain_yam.sh rl/runs/<run> 12000      # same resume behaviour
+cd yam_agentic/sim_first/sim
+BATCH=8 CKPT_EVERY=4000 ./run_chain_yam.sh <run> 20000    # same resume behaviour
 ```
 
 **Check nothing is doubled up** — two trainers on one GPU halves throughput:
@@ -57,7 +57,7 @@ The policy is trained on randomised backgrounds, camera poses and camera effects
 needs no recalibration of the *sim*. What does need redoing:
 
 1. Re-capture real reference frames (they set the augmentation ranges and get composited in):
-   `rl/yam/real_ref/` on the Mac, `real_wrist/` on the GX10 — see `capture` notes in HANDOFF.
+   [`real_ref/`](real_ref/) in this repo (scene + wrist), `real_wrist/` on the GX10 — see `capture` notes in HANDOFF.
 2. Re-check the scene camera actually frames the table and the user's face.
 3. Nothing else. No marker board, no intrinsics, no camera-to-robot transform: the policy takes
    2D prompts only.
@@ -72,7 +72,7 @@ order to work in.
 - GX10 `runs/yam_g1`: 2,104 demos / 197k frames, ACT training, ~253 samples/s, evals every 2000
   steps against held-out backgrounds. This dataset predates the wrist-camera remount and the
   gripper correction below, so treat its numbers as a pipeline check, not a final result.
-- Mac: `rl/runs/yam_v1` (1,017 demos) — superseded, trained with too-heavy blur.
+- `yam_v1` (1,017 demos, Mac, not in repo) — superseded: too-heavy blur AND the wrong gripper.
 - **Open:** the gripper. The menagerie model ships `crank_4310` (79 mm throw); the real arm has
   rack-and-pinion sliding jaws on a DM4310 = `linear_4310` (95 mm throw, matching I2RT's spec).
   Meshes are vendored at `third_party/i2rt/i2rt/robot_models/gripper/`. Until that swap lands,

@@ -60,7 +60,7 @@ hard-coded 75 mm to widen.
   `linear_4310` the camera inherited that rotation and looked **124° away from the TCP**. The
   wrist view was nothing but gripper; a policy trained on it would have been blind. Now anchored
   on `tcp_site`, which stays in `link_6` in both variants: 22.5° off-axis, table and objects
-  visible. See `media/film_linear4310_can.png` — compare against `sim_first/real_ref/wrist_real.jpg`.
+  visible. See [`../media/film_linear4310_can.png`](../media/film_linear4310_can.png) against [`real_ref/wrist_real.jpg`](real_ref/wrist_real.jpg); jaw openings in [`../media/linear4310_jaw_openings.png`](../media/linear4310_jaw_openings.png).
 
 **This invalidates every dataset generated before 2026-09-20.** They carry the wrong gripper,
 and the ones that used `linear_4310` also carry the broken wrist view. Regenerate before training.
@@ -96,23 +96,40 @@ you cannot randomise away the wrong finger shape in the foreground of every fram
 
 ## 3. What works right now
 
+Everything below runs **from this clone**. The only things not vendored are the two model
+trees (mujoco_menagerie is ~1 GB, i2rt ships its own repo) — point at them once:
+
 ```bash
-cd ~/so101Sim
-urlab_bridge/.venv/bin/python -m pytest rl/yam/test_yam_sim.py -q          # 12 passed (linear_4310, default)
-YAM_ARM=stock urlab_bridge/.venv/bin/python -m pytest rl/yam/test_yam_sim.py -q   # 12 passed (crank, regression)
-YAM_AUG_PROFILE=real urlab_bridge/.venv/bin/python rl/yam/gen_demos_yam.py rl/runs/<run>/demos 1400 --workers 12
-rl/yam/run_chain_yam.sh rl/runs/<run> 12000
+git clone https://github.com/google-deepmind/mujoco_menagerie
+git clone https://github.com/i2rt-robotics/i2rt
+export YAM_MENAGERIE=$PWD/mujoco_menagerie/i2rt_yam
+export I2RT_ROOT=$PWD/i2rt
+
+cd yam_agentic/sim_first/sim
+python -m pytest test_yam_sim.py -q                    # 12 passed (linear_4310, the default)
+YAM_ARM=stock python -m pytest test_yam_sim.py -q      # 12 passed (crank, regression)
+python demo_pick_present.py can                        # filmstrip + "object still held: True"
+
+YAM_AUG_PROFILE=real python gen_demos_yam.py <run>/demos 1400 --workers 12
+./run_chain_yam.sh <run> 20000                          # BATCH=8 CKPT_EVERY=4000 recommended
 ```
 
-`demo_pick_present.py can` reports `strategy=top lifted 75 mm in 5.9 s`, `object still held: True`.
+`<run>` is any directory you choose. The background pools are not in the repo either:
+`bg_heldout/fetch.sh` recreates the held-out set, and `bg_train` is the same trick with seeds
+`yamtrain1..800`.
+
+Every measurement quoted in this file is reproducible from
+[`../tools/`](../tools/README.md) — see that README for what each script answers.
+
+From `sim/`, `python demo_pick_present.py can` reports `strategy=top lifted 75 mm in 5.9 s`, `object still held: True`.
 
 ### State of the runs
 
 | run | what | verdict |
 |---|---|---|
 | GX10 `runs/yam_g1` | 2,104 demos / 197k frames, first eval 0/56 | **scrap** — wrong gripper, old wrist mount, over-heavy blur. Says nothing about the approach. |
-| Mac `rl/runs/yam_v1` | 1,017 demos | superseded |
-| Mac `rl/runs/yam_v2` | partial | deleted |
+| `yam_v1` (Mac, not in repo) | 1,017 demos | superseded — wrong gripper |
+| `yam_v2` (Mac, not in repo) | partial | deleted |
 
 ## 4. Order to work in
 
@@ -129,7 +146,7 @@ rl/yam/run_chain_yam.sh rl/runs/<run> 12000
   (what the camera renders) can disagree by 80 mm on a tapered finger. Nearly every wrong
   conclusion in this investigation came from mixing them up.
 - **Render it.** Two renders — the jaws at three openings, and the rig mid-grasp — settled in a
-  minute what hours of projection algebra could not. `media/linear4310_jaw_openings.png`.
+  minute what hours of projection algebra could not. [`../media/linear4310_jaw_openings.png`](../media/linear4310_jaw_openings.png).
 - **Go to the vendor and to the literature before hand-deriving.** i2rt ship the composer, the
   CAD and a PR describing this exact trap; menagerie already solved it for the crank.
 - **Check both fingers when testing a gripper.** `mj_forward` does not solve the `<equality>`
