@@ -169,6 +169,15 @@ class OpenYAMFeedEnv(gym.Env):
             self.model.opt.impratio = float(self.ecfg.get("impratio", 10.0))
             self.model.opt.noslip_iterations = int(self.ecfg.get("noslip_iterations", 4))
 
+        # The menagerie model has gravity compensation ON for every arm link, so the sim arm never sags. The real
+        # one does (arm_replay: 11 cm low on position control, 1.4 cm with gravity feed-forward). YAM_GRAVCOMP < 1
+        # leaves that fraction of gravity UNcompensated, to test the pipeline against an imperfect feed-forward.
+        gc = float(os.environ.get("YAM_GRAVCOMP", self.ecfg.get("arm_gravcomp", 1.0)))
+        if gc != 1.0:
+            root = self.model.body("arm").id
+            for b in range(self.model.nbody):
+                if self._descends(b, root):
+                    self.model.body_gravcomp[b] = gc
         self.action_space = spaces.Box(-1.0, 1.0, shape=(7,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(33,), dtype=np.float32)
 

@@ -64,6 +64,28 @@ and the variety of skin tones/backgrounds on THIS camera.** Do that with `live_p
 With every row marked **removed** active, 3 × 40 full pick-and-feed runs: **fed 88/120 (73%) with the fine-tuned
 pinch policy (61% with the old one), unsafe arrivals 0, dropped 1.**
 
+## `real_arm.py` — the backend, completing `arm_replay/` for this pipeline (NEVER RUN ON THE ARM)
+
+Reuses `arm_replay/replay_pose2.py`'s tested `Gravity` and `Sender` (one MIT command per joint per tick with
+gravity + friction feed-forward; state from the replies, because reading a live motor makes it go limp) and adds
+what that README lists as not done:
+
+* **Hold, never disable** — a guard trip keeps sending the last *commanded* setpoint with feed-forward.
+* **Continue from the commanded setpoint**, never the measured one (re-seeding drops the holding torque).
+* **Torque / contact stop** — if a motor reports more than `CONTACT_NM` (7/8/7/3/2/2 N·m) beyond its
+  feed-forward for 3 ticks, e.g. pressing into the table, the arm **retraces its last 15 setpoints** to relieve
+  the pressure, then holds.
+* **Release only at rest** — `shutdown()` ramps back to the enable pose and disables only if the replies confirm it.
+* **Policy targets through the measured joint map**, clipped 0.10 rad inside the measured hard stops and
+  rate-limited again (0.02 rad/tick): the backend does not trust its caller.
+* `connect()` needs `YAM_REAL_ARM=I_AM_AT_THE_ARM_WITH_THE_ESTOP` **and** a typed confirmation at a terminal, and
+  is deliberately left unwired: the first powered run of new code is a person's job.
+
+`python arm/real/real_arm.py --selftest` (fake motors, no CAN): 16 checks, all pass.
+**Blocking gap: the gripper (motor 0x08) open/closed readings were never measured, so grip targets are refused.**
+Also unresolved and inherited: no watchdog (TIMEOUT=0 — do not change the register), the driver's `atexit` disables
+motors so a faulted process must be kept alive, the gravity model is ~1.7× off at the extended elbow.
+
 ## Order of work to go live (none of it done here)
 
 1. `calibrate_camera.py` with the lens that will be used, focus locked. Aim for rms < 0.7 px.

@@ -18,7 +18,10 @@ What a real backend MUST do, from what arm_replay/ measured on this arm (commit 
      backend must HOLD (or lower slowly), never release, above a person.
   4. A WATCHDOG. This arm reports TIMEOUT=0; if the controller dies the motors keep their last command. Until
      that is resolved a human must hold the E-stop for any run near a person.
-  5. RATE + LIMITS. The policies were trained at 30 Hz with <= 0.02 rad per step per joint and a 0.35 low-pass;
+  5. CONTINUE FROM THE LAST COMMANDED SETPOINT, never from the measured position. Re-seeding at the sagged,
+     measured pose removes the torque that was holding the arm up and it falls until the error rebuilds
+     (arm_replay runs 1-3). Every command here is previous_target + step; read() is for observation only.
+  6. RATE + LIMITS. The policies were trained at 30 Hz with <= 0.02 rad per step per joint and a 0.35 low-pass;
      the feed adds 0.20 m/s retreat, 0.10 m/s approach, a 0.012 m/s crawl at the face and 0.35 m/s^2. The
      backend must enforce these again itself; it must not trust the caller.
 """
