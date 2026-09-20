@@ -55,4 +55,4 @@ training:
   gae_lambda: 0.95
   ent_coef: 0.004              # more exploration than 0.001; reach stalled at 5% before
   policy_layers: [256, 256]
-  checkpoint_freq: 50000       # ~every 25 s: a move costs at most that much progress
+  checkpoint_freq: 10000       # ~2.5 s of progress at risk in a hard crash
