@@ -1,0 +1,57 @@
+{
+  "captured_at": "2026-09-20T12:09:00+08:00",
+  "status": {
+    "running": true,
+    "calibrated": true,
+    "device": "cuda",
+    "models": ["unigaze_h14_joint", "puregaze_r50", "gazetr_hybrid", "xgaze_resnet18"],
+    "fps": 0.82
+  },
+  "screen_geometry": {
+    "width_px": 1234,
+    "height_px": 676,
+    "pitch_mm": 0.2355845288314135,
+    "cam_offset_px": [0.0, 18.0]
+  },
+  "camera": {
+    "width": 640,
+    "height": 480,
+    "fx": 492.7567884206665
+  },
+  "calibration_report": {
+    "n_samples": 31,
+    "n_points": 14,
+    "chosen_model": "geo-head+ridge300",
+    "cv_err_px": 412.71669159784614,
+    "fit_err_px": 432.9706182420323,
+    "candidates_ranked": [
+      {"name": "geo-head+ridge300", "cv_err_px": 412.72},
+      {"name": "geo-additive+ridge300", "cv_err_px": 414.71},
+      {"name": "geo-additive+ridge30", "cv_err_px": 421.93},
+      {"name": "geo-head+ridge30", "cv_err_px": 421.98}
+    ],
+    "params": {
+      "kappa": [0.22184625215880188, -0.004259059267894114],
+      "omega": [0.03371997153003366, 0.024994038130069274, -0.04210135779541751],
+      "t": [139.46410350821546, -6.7951811270530795, 21.30167488821216],
+      "log_depth": -0.49999999999999317,
+      "kappa_mode": "head"
+    },
+    "fit_ms": 268.28
+  },
+  "timing_per_model_ms": {
+    "unigaze_h14_joint": 86.9,
+    "puregaze_r50": 4.6,
+    "gazetr_hybrid": 3.7,
+    "xgaze_resnet18": 1.7,
+    "face_detection": 12.96,
+    "total_gpu": 97.42,
+    "total": 110.67
+  },
+  "notes": [
+    "CV error ~413px is relatively high - consider recalibrating with better lighting/positioning",
+    "unigaze_h14_joint takes 86.9ms (89% of GPU time) - using only puregaze_r50 would be ~10x faster",
+    "Calibration saved to default.json on server",
+    "Run with --models puregaze_r50 for ~30 Hz instead of ~0.8 Hz"
+  ]
+}

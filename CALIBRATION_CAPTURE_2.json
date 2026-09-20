@@ -1,0 +1,78 @@
+{
+  "captured_at": "2026-09-20T12:12:00+08:00",
+  "status": {
+    "running": true,
+    "calibrated": true,
+    "device": "cuda",
+    "models": ["unigaze_h14_joint", "puregaze_r50", "gazetr_hybrid", "xgaze_resnet18"],
+    "fps": 0.805
+  },
+  "screen_geometry": {
+    "width_px": 1234,
+    "height_px": 676,
+    "pitch_mm": 0.2355845288314135,
+    "cam_offset_px": [0.0, 18.0]
+  },
+  "camera": {
+    "width": 640,
+    "height": 480,
+    "fx": 492.7567884206665
+  },
+  "calibration_report": {
+    "n_samples": 31,
+    "n_points": 14,
+    "chosen_model": "geo-additive",
+    "cv_err_px": 444.6404490495259,
+    "fit_err_px": 396.401819370701,
+    "candidates_ranked": [
+      {"name": "geo-additive", "cv_err_px": 444.64},
+      {"name": "geo-head", "cv_err_px": 446.37},
+      {"name": "geo-additive+ridge300", "cv_err_px": 453.27},
+      {"name": "geo-head+ridge300", "cv_err_px": 454.22}
+    ],
+    "params": {
+      "kappa": [-0.1865792802353059, 0.016447260325639337],
+      "omega": [0.05240042039135009, -0.07156125384002048, 0.06624533213770957],
+      "t": [136.6093084045893, 1.1387495629882793, 4.408306567411893],
+      "log_depth": -0.2644505309753613,
+      "kappa_mode": "additive"
+    },
+    "per_point_cv_px": {
+      "0": 162.96,
+      "1": 483.64,
+      "2": 701.19,
+      "3": 544.67,
+      "4": 397.47,
+      "5": 755.16,
+      "6": 654.14,
+      "7": 557.07,
+      "8": 628.46,
+      "9": 245.99,
+      "10": 328.54,
+      "11": 204.50,
+      "12": 363.75,
+      "13": 197.43
+    },
+    "fit_ms": 209.85
+  },
+  "timing_per_model_ms": {
+    "unigaze_h14_joint": 85.5,
+    "puregaze_r50": 4.0,
+    "gazetr_hybrid": 3.6,
+    "xgaze_resnet18": 2.2,
+    "face_detection": 6.61,
+    "total_gpu": 95.63,
+    "total": 102.50
+  },
+  "comparison_to_calibration_1": {
+    "cv_err_px_diff": "+31.92 (this: 444.64 vs prev: 412.72)",
+    "chosen_model_changed": "geo-head+ridge300 → geo-additive",
+    "kappa_mode_changed": "head → additive"
+  },
+  "notes": [
+    "User reported this calibration 'feels better'",
+    "Different calibration model chosen (geo-additive vs geo-head+ridge300)",
+    "Point 5 has highest error (755px) - may need attention",
+    "Saved to default.json on server"
+  ]
+}
