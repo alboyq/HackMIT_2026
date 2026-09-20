@@ -143,9 +143,11 @@ def main():
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--hfov", type=float, default=66.0, help="camera horizontal FOV prior; calibration refines the scale")
     ap.add_argument("--preload", action="store_true", help="load models before serving")
+    ap.add_argument("--fp16", action="store_true",
+                    help="half precision on CUDA/MPS; ~0.05 deg cost, halves VRAM (use on <=6 GB cards)")
     a = ap.parse_args()
     pipe = Pipeline(models=a.models.split(","), camera_index=a.camera, width=a.width, height=a.height,
-                    hfov_deg=a.hfov, tta_flip=not a.no_tta)
+                    hfov_deg=a.hfov, tta_flip=not a.no_tta, fp16=a.fp16)
     if a.preload:
         pipe.load()
     print(f"gaze3d → http://localhost:{a.port}", flush=True)

@@ -161,33 +161,92 @@ broken by the screen-axis sign error, because the test generated its data with t
 convention it was testing against. Any change to the geometry must be re-validated on a real
 fixation set, not just on the simulation.
 
-## 9. Next steps, in priority order
+## 9. The open model question
 
-1. **Run the head-motion test and record per-movement-type numbers.** The UI reports error binned
-   by head rotation, distance change *and* movement type (yaw / pitch / depth / lateral / roll),
-   but no real run has produced those bins yet. This is the single most informative missing
-   measurement — it says whether rotation or depth is the weak axis, and therefore what to fix.
-2. **Re-validate with the randomised motion protocol.** Both real sessions predate it. The current
-   protocol is five movement types × two random, well-separated locations, shuffled; the earlier
-   one used five fixed locations. Confirm 1.0–1.3° still holds.
-3. **Outlier rejection during validation.** One target in the last run was 2.87° while its
+**The model family is settled; the specific line-up is not.** Worth being precise about which
+parts are closed, because it is easy to reopen the wrong one:
+
+*Closed.* Everything in the ensemble is ETH-XGaze-trained, for the reasons in section 2. The
+Gaze360-family alternatives were evaluated and rejected. Each wrapper's output order and
+preprocessing are verified empirically (section 4). Do not revisit these without new evidence.
+
+*Open, and unmeasured on this rig:*
+
+1. **Does the four-model ensemble actually beat UniGaze ViT-H on its own?** This has never been
+   ablated. The models are averaged with **uniform weights, chosen by default rather than by
+   evidence.** It is entirely possible the ensemble drags the strongest model toward three weaker
+   ones. Beware the one number that looks like an answer and is not: XGaze-ResNet18 sits closest
+   to the ensemble mean (1.02° vs UniGaze's 1.69°), but proximity to the mean is *agreement, not
+   accuracy*, and the two XGaze-trained ResNets agree partly because they share training data.
+2. **Which UniGaze size.** ViT-H/14 is ~78 % of the GPU budget (77 ms isolated, 96–160 ms with a
+   browser running) and is the reason the loop sits at 8 Hz. L16 is ~34 ms, B16 ~12 ms. Whether
+   accuracy holds at ~1.0–1.3° on a smaller backbone is untested.
+
+**Both questions are settled by one calibration session, offline, with no extra data collection.**
+Every sample stores each model's individual prediction vector under `per_model`, so any subset or
+weighting can be recomputed, refitted and cross-validated after the fact — the comparison is pure
+numpy and needs no GPU. Note that as of this writing **no session files exist**: the two real runs
+predate sample persistence (section 10) and were lost. The next calibration produces the data.
+
+## 10. Sample persistence and recovery
+
+Calibration costs a minute of a subject's attention, so losing it is expensive. It happened once:
+the samples lived only in process memory, the fit never fired (the page left fullscreen before
+issuing it), and the server later exited, taking 499 frames with it.
+
+Now:
+
+- every armed point is appended to `profiles/session-<timestamp>.jsonl` the moment it closes, with
+  a `meta` first line recording screen geometry and focal length;
+- a successful fit auto-saves the profile to `profiles/default.json`;
+- **Recover last calibration** on the camera screen (server command `recover`) re-fits from the
+  newest session file and goes straight into validation.
+
+This is also what makes the ablation above a pure offline job.
+
+## 11. Running on other hardware (CUDA, smaller GPUs)
+
+Developed on an M4 Max, but nothing is Mac-specific by design:
+
+- `models.py::pick_device` prefers MPS, then CUDA, then CPU — a CUDA box picks itself up.
+- `camera.py::default_backend` selects AVFoundation / V4L2 / MSMF by platform, with a CAP_ANY
+  fallback. (An earlier version hard-coded AVFoundation, which fails on Linux and Windows with an
+  empty device rather than a clear error.)
+- `--fp16` halves the weight footprint on CUDA/MPS. Measured cost on real face crops: **0.034° per
+  model, 0.015° on the ensemble mean** — negligible against a 1.3° measurement floor. On random
+  noise the gap is ~0.18°, so benchmark precision on real frames, not synthetic input.
+
+Weight footprint, which is what decides whether a card copes: the full ensemble is ~680 M
+parameters, ≈2.7 GB in fp32 and ≈1.4 GB in fp16, plus activations and CUDA context. A 4 GB card
+should use `--fp16` or a smaller UniGaze; 8 GB runs fp32 comfortably.
+
+**Accuracy comparisons transfer between machines; latency comparisons do not.** Model outputs are
+hardware-independent to well under the noise floor, so an ablation run on one box is valid
+everywhere. Per-model *timings* are not — and since the model choice depends partly on latency, the
+right conclusion can genuinely differ per machine.
+
+## 12. Next steps, in priority order
+
+1. **Run the head-motion test and record per-movement-type numbers.** The UI bins error by head
+   rotation, distance change *and* movement type (yaw / pitch / depth / lateral / roll), but no real
+   run has produced those bins. This is the most informative missing measurement — it says whether
+   rotation or depth is the weak axis, and therefore what to fix next.
+2. **Settle the model question** (section 9) from the next calibration session. One session, then
+   an offline sweep over subsets and weightings.
+3. **Re-validate with the randomised motion protocol.** Both real sessions predate it. The current
+   protocol is five movement types × two random, well-separated locations, shuffled.
+4. **Outlier rejection during validation.** One target in the last run was 2.87° while its
    neighbours were ~0.9° — almost certainly a blink or a drift. Blink gating exists for the live
    signal but validation windows accept everything.
-4. **Learn per-model ensemble weights** from the calibration residuals. Weights are currently
-   uniform; XGaze-ResNet18 is the closest to the ensemble mean and UniGaze is the strongest model,
-   so uniform averaging is unlikely to be optimal. The per-model vectors are already stored in
-   every calibration sample (`per_model`), so this can be fitted offline from existing sessions.
-5. **Try the L16 ensemble** (`--models unigaze_l16_joint,…`) and check whether accuracy holds at
-   ~1.0°. If it does, it doubles the frame rate to ~17 Hz and should become the default.
-6. **Temporal modelling.** Every network here is single-frame. Fixation-aware aggregation (median
+5. **Temporal modelling.** Every network here is single-frame. Fixation-aware aggregation (median
    over a detected fixation) or a multi-frame model is the obvious next accuracy lever.
-7. **More pixels on the eyes.** At 1080p and 64 cm each eye is ~40 px wide. This, not depth
-   sensing, is the biggest hardware lever for a camera-only pipeline. (A depth camera would fix
-   the scale ambiguity and steady the head pose — worth maybe 10–20 % — but cannot see iris
-   geometry and so does nothing for the direction estimate, which dominates the error. Active IR
-   with corneal glints, i.e. a Tobii, is the real accuracy upgrade.)
+6. **More pixels on the eyes.** At 1080p and 64 cm each eye is ~40 px wide. This, not depth sensing,
+   is the biggest hardware lever for a camera-only pipeline. (A depth camera would fix the scale
+   ambiguity and steady the head pose — worth maybe 10–20 % — but cannot see iris geometry and so
+   does nothing for the direction estimate, which dominates the error. Active IR with corneal
+   glints, i.e. a Tobii, is the real accuracy upgrade.)
 
-## 10. Where to look
+## 13. Where to look
 
 | Question | File |
 |---|---|

@@ -27,11 +27,13 @@ DEFAULT_MODELS = ["unigaze_h14_joint", "puregaze_r50", "gazetr_hybrid", "xgaze_r
 
 
 class Pipeline:
-    def __init__(self, models=None, camera_index=0, width=1920, height=1080, hfov_deg=66.0, tta_flip=True):
+    def __init__(self, models=None, camera_index=0, width=1920, height=1080, hfov_deg=66.0, tta_flip=True,
+                 fp16=False):
         self.models = models or DEFAULT_MODELS
         self.camera_index, self.width, self.height = camera_index, width, height
         self.hfov_deg = hfov_deg
         self.tta_flip = tta_flip
+        self.fp16 = fp16
         self.cam: Camera | None = None
         self.tracker: FaceTracker | None = None
         self.ens: Ensemble | None = None
@@ -59,7 +61,7 @@ class Pipeline:
         if self.loaded:
             return
         self._set(status="loading models")
-        self.ens = Ensemble(self.models, tta_flip=self.tta_flip)
+        self.ens = Ensemble(self.models, tta_flip=self.tta_flip, fp16=self.fp16)
         self.loaded = True
         self._set(status="models ready", models=self.ens.names, device=str(self.ens.device))
 

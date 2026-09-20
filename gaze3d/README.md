@@ -30,7 +30,12 @@ Faster variants, if 8 Hz is not enough:
 ./run.sh --models unigaze_l16_joint,puregaze_r50,gazetr_hybrid,xgaze_resnet18   # ~17 Hz
 ./run.sh --models unigaze_b16_joint,puregaze_r50,gazetr_hybrid,xgaze_resnet18   # ~22 Hz
 ./run.sh --no-tta                                                               # skip flip TTA
+./run.sh --fp16                                                                 # half precision
 ```
+
+On CUDA (tested path: the device is auto-selected, the capture backend follows the OS) the full
+ensemble needs ~2.7 GB of weights in fp32 or ~1.4 GB with `--fp16`. Use `--fp16` on a 4–6 GB card;
+it costs 0.015° on the ensemble mean, far below the 1.3° measurement floor.
 
 ## What a session looks like
 

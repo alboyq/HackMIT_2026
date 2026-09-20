@@ -1,14 +1,28 @@
 """Threaded webcam capture. Always hands out the newest frame so inference never
 queues behind stale video."""
 from __future__ import annotations
-import threading, time
+import sys, threading, time
 import cv2
 import numpy as np
 
 
+def default_backend() -> int:
+    """OpenCV capture backend for this OS. AVFoundation is macOS-only; forcing it
+    elsewhere makes VideoCapture fail with an empty device rather than an error."""
+    if sys.platform == "darwin":
+        return cv2.CAP_AVFOUNDATION
+    if sys.platform.startswith("linux"):
+        return cv2.CAP_V4L2
+    if sys.platform.startswith("win"):
+        return cv2.CAP_MSMF
+    return cv2.CAP_ANY
+
+
 class Camera:
-    def __init__(self, index: int = 0, width: int = 1920, height: int = 1080, fps: int = 30):
+    def __init__(self, index: int = 0, width: int = 1920, height: int = 1080, fps: int = 30,
+                 backend: int | None = None):
         self.index, self.width, self.height, self.fps = index, width, height, fps
+        self.backend = default_backend() if backend is None else backend
         self._cap = None
         self._lock = threading.Condition()
         self._frame = None
@@ -19,11 +33,11 @@ class Camera:
         self.measured_fps = 0.0
 
     def start(self):
-        cap = cv2.VideoCapture(self.index, cv2.CAP_AVFOUNDATION)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        cap.set(cv2.CAP_PROP_FPS, self.fps)
-        if not cap.isOpened():
+        cap = self._open(self.backend)
+        if cap is None and self.backend != cv2.CAP_ANY:
+            print(f"[gaze3d] capture backend {self.backend} failed, falling back to CAP_ANY", flush=True)
+            cap = self._open(cv2.CAP_ANY)
+        if cap is None:
             raise RuntimeError(f"camera {self.index} could not be opened")
         ok, f = cap.read()
         if not ok:
@@ -35,6 +49,16 @@ class Camera:
         self._thread = threading.Thread(target=self._loop, daemon=True, name="camera")
         self._thread.start()
         return self
+
+    def _open(self, backend: int):
+        cap = cv2.VideoCapture(self.index, backend)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        cap.set(cv2.CAP_PROP_FPS, self.fps)
+        if not cap.isOpened():
+            cap.release()
+            return None
+        return cap
 
     def _loop(self):
         n, t0 = 0, time.perf_counter()
