@@ -78,12 +78,17 @@ what that README lists as not done:
 * **Release only at rest** — `shutdown()` ramps back to the enable pose and disables only if the replies confirm it.
 * **Policy targets through the measured joint map**, clipped 0.10 rad inside the measured hard stops and
   rate-limited again (0.02 rad/tick): the backend does not trust its caller.
-* `connect()` needs `YAM_REAL_ARM=I_AM_AT_THE_ARM_WITH_THE_ESTOP` **and** a typed confirmation at a terminal, and
-  is deliberately left unwired: the first powered run of new code is a person's job.
+* `connect()` needs `YAM_REAL_ARM=I_AM_AT_THE_ARM_WITH_THE_ESTOP` **and** a typed `MOVE` at a terminal. It is wired the
+  way `replay_pose2.main()` is (watchdog register READ and required to be 0, never written; no latched faults; laps
+  inferred from the measured stops, refusing if ambiguous; read -> enable -> hold in place). **It has never been run.**
+* **Gripper (0x08)**: measured closed -0.0600 / open -2.8775 rad (`read_gripper.py`, motor disabled). Targets stay
+  0.08 rad off both ends; the setpoint may lead the measured jaws by <= 0.10 rad, so a blocked jaw squeezes with
+  <= ~2 N.m instead of winding up. A hold keeps the jaws gripping.
+* First powered run, by a person at the arm with the E-stop: `real_arm.py --hold-test 10` (asks for ZERO motion, prints
+  torques, releases only if at rest - otherwise keeps holding until a second Ctrl-C). Then `--hold-test 12 --grip`.
 
-`python arm/real/real_arm.py --selftest` (fake motors, no CAN): 17 checks, all pass.
-**Blocking gap: the gripper (motor 0x08) open/closed readings were never measured, so grip targets are refused.**
-Also unresolved and inherited: no watchdog (TIMEOUT=0 — do not change the register), the driver's `atexit` disables
+`python arm/real/real_arm.py --selftest` (fake motors, no CAN): 21 checks, all pass.
+Unresolved and inherited: no watchdog (TIMEOUT=0 — do not change the register), the driver's `atexit` disables
 motors so a faulted process must be kept alive, the gravity model is ~1.7× off at the extended elbow.
 `fit_gravity.py` (offline, on `arm_replay/logs`) shows that error is **not a missing mass** - the shoulder would see it
 too and does not - so it is local to the elbow (most likely that motor's torque scale). One more held pose on the arm,
