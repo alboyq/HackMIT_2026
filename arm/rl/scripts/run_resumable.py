@@ -133,7 +133,7 @@ def main() -> None:
         env.training, env.norm_reward = True, True
         model = PPO.load(model_path, env=env, device="cpu",
                          tensorboard_log=str(args.run_dir / "tensorboard"))
-        if transferred and transferred_from == "reach":
+        if transferred and transferred_from == "reach" and args.stage != "reach":
             reset_gripper_head(model)
         done = 0 if transferred else model.num_timesteps
         print(f"[resume] {model_path.name} at {done} steps; {max(0, total - done)} remaining")

@@ -62,7 +62,16 @@ env:
   knock_free_m: 0.10           # contact under this is approach, not batting
   object_lost_m: 0.45          # past this it is gone: end the episode, do not chase
   object_lost_z: -0.05
-  reach_offset_z: 0.035        # reach aims ABOVE the object: a pre-grasp pose
+  reach_offset_z: 0.055        # reach aims ABOVE the object. Was 0.035; the grasp point moved
+                               # 20 mm toward the gripper base, so the tips hang that much lower,
+                               # and at 0.035 reach knocked objects up to 59 mm on arrival.
+  # Pose: straight down the camera axis, jaws squared to the object, object seated deep.
+  max_tilt_deg: 15.0           # reach must ARRIVE this close to vertical
+  max_off_square_deg: 15.0     # and this square to a box (round objects are exempt)
+  orient_radius_m: 0.15        # orientation only costs this close to the target
+  orient_penalty: 0.10
+  min_seat_frac: 0.6           # a grasp counts only with the object this deep between the claws
+  seat_penalty: 0.10           # pulls the gripper base toward the object before closing
   grasp_hold_s: 0.3            # a grasp has to persist, not flicker for one frame
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.08

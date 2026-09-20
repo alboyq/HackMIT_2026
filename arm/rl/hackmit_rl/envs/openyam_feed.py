@@ -69,6 +69,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.handoff_steps = 0
         self.prev_lift = 0.0
         self.stage_object_start = np.zeros(3)
+        self.tip_ahead = None        # fingertip distance past the TCP, measured off the model
 
         self.scene = YamScene(objects=list(OBJECTS))
         self.model, self.data = self.scene.model, self.scene.data
@@ -461,6 +462,30 @@ class OpenYAMFeedEnv(gym.Env):
         height = float(obj_pos[2]) - self.rest_z[self.name]
         stage_drift = float(np.linalg.norm(obj_pos[:2] - self.stage_object_start[:2]))
         joint_speed_now = float(np.abs(self.data.qvel[self.dadr]).max())
+        # Gripper pose relative to the object. Straight down the camera axis, jaws squared to
+        # the object with the wrist, object SEATED between the claws rather than nipped by the
+        # tips. Measured before any of this was asked for: 13-19 deg tilt at hand-off (max 32),
+        # jaws 15-23 deg off-square, and a block up to 82 mm corner-to-corner against an 82.8 mm
+        # opening -- which only fits squared up. The block was the worst object in every census.
+        Rt = self.data.site_xmat[self.tool.site_id].reshape(3, 3)
+        tool_axis, jaw_axis = Rt @ self.tool.tool_local, Rt @ self.tool.jaw_local
+        tilt_deg = float(np.degrees(np.arccos(np.clip(-tool_axis[2], -1.0, 1.0))))
+        if self.name == "block":
+            face = self.data.xmat[self.obj_bid[self.name]].reshape(3, 3)[:, 0]
+            yaw = float(np.arctan2(jaw_axis[1], jaw_axis[0]) - np.arctan2(face[1], face[0]))
+            square_err = float(np.sin(2.0 * yaw) ** 2)                  # 0 squared, 1 at 45 deg
+            off_square_deg = abs(((np.degrees(yaw) + 45.0) % 90.0) - 45.0)
+        else:
+            square_err, off_square_deg = 0.0, 0.0                       # round: any yaw fits
+        if self.tip_ahead is None:
+            self.tip_ahead = 0.008 + max(float((self.data.geom_xpos[g] - tcp) @ tool_axis)
+                                         for g in self.pad_geoms)
+        # How far the object's centre is past the fingertips, toward the gripper base, as a
+        # fraction of what the table allows for an object this tall.
+        insertion = float((obj_pos - (tcp + tool_axis * self.tip_ahead)) @ (-tool_axis))
+        seat_frac = float(np.clip(insertion / max(1e-3, self.rest_z[self.name] - 0.005), 0.0, 1.0))
+        oriented = (tilt_deg <= float(self.ecfg["max_tilt_deg"])
+                    and off_square_deg <= float(self.ecfg["max_off_square_deg"]))
 
         # Virtual wall around the head: never reward getting closer than this.
         wall = float(self.ecfg["pad_min_distance_m"])
@@ -473,6 +498,7 @@ class OpenYAMFeedEnv(gym.Env):
             # through the object before the jaws can act.
             joint_speed = float(np.abs(self.data.qvel[self.dadr]).max())
             settled = (distance <= float(self.ecfg["success_distance_m"])
+                       and oriented
                        and joint_speed <= float(self.ecfg["reach_settle_qvel"])
                        and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
             self.hold_steps = self.hold_steps + 1 if settled else 0
@@ -484,7 +510,8 @@ class OpenYAMFeedEnv(gym.Env):
                                 if distance <= float(self.ecfg["success_distance_m"]) else 0.0)
         elif self.stage == "grasp":
             settled = stage_drift <= float(self.ecfg["grasp_max_displacement_m"])
-            self.hold_steps = self.hold_steps + 1 if (pinched and closed and settled) else 0
+            seated = seat_frac >= float(self.ecfg["min_seat_frac"])
+            self.hold_steps = self.hold_steps + 1 if (pinched and closed and settled and seated) else 0
             success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
         elif self.stage == "lift":
             # Straight up, then STOP. Present needs a stationary, known starting pose, and an
@@ -523,6 +550,14 @@ class OpenYAMFeedEnv(gym.Env):
 
         progress = self.prev_dist - distance
         reward = 10.0 * progress - 0.1 * distance
+        if self.stage in ("reach", "grasp") and phase < 2:
+            # COSTS, fading in with proximity so the transit is free. Never a bonus: a pose that
+            # pays per step is a pose worth loitering in.
+            near = float(np.clip(1.0 - distance / float(self.ecfg["orient_radius_m"]), 0.0, 1.0))
+            reward -= float(self.ecfg["orient_penalty"]) * near * (
+                min(1.0, tilt_deg / 30.0) + square_err)
+            if self.stage == "grasp":
+                reward -= float(self.ecfg["seat_penalty"]) * near * (1.0 - seat_frac)
 
         if phase == 0:
             # Approach clean: a COST for closing early or touching, never a per-step reward for
@@ -635,7 +670,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "grip_fraction": grip_fraction, "lead_margin_m": lead_margin,
                 "tcp_speed_mps": tcp_speed, "joint_speed": float(np.abs(self.data.qvel[self.dadr]).max()), "pad_gap_m": head_gap, "phase": phase, "in_position": bool(in_position),
                 "knocked": bool(self.knocked), "lost": bool(lost), "failed": bool(failed),
-                "lift_m": height, "stage_drift_m": stage_drift}
+                "lift_m": height, "stage_drift_m": stage_drift, "tilt_deg": tilt_deg,
+                "off_square_deg": float(off_square_deg), "seat_frac": seat_frac}
         return self._observation(), float(reward), bool(success or failed), bool(truncated), info
 
     def render(self):

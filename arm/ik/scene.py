@@ -36,6 +36,7 @@ YAM_CAM_RES, YAM_WRIST_FOVY, YAM_SCENE_FOVY.
 """
 import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -71,6 +72,12 @@ GRIP_KP = float(os.environ.get("YAM_GRIP_KP", "800"))    # see _patched_arm
 # 44 mm to one side (measured: TCP 44.0 mm off joint6's axis). The team's printed fingers
 # converge onto the centreline, so the real grasp point is ON the axis. 0 = in the middle.
 FINGER_OFFSET_M = float(os.environ.get("YAM_FINGER_OFFSET_M", "0.0"))
+# Rows of pad contact points along the gripping face, as z in the finger frame (plate spans
+# 0.006-0.086, tip at 0.086). The stock model has only the last three (0.060-0.078), and since
+# a grasp counts only when pads touch the object, and the TCP is the pads' mean, that FORCED
+# fingertip grasps. Rows down the whole face let a deep grasp count and move the TCP ~19 mm
+# toward the base. The tip rows stay: a short object on a table can only reach that far in.
+PAD_ROWS_Z = (0.078, 0.070, 0.060, 0.050, 0.040, 0.030, 0.020)
 GRIP_KV = float(os.environ.get("YAM_GRIP_KV", "30"))
 
 # the user, seated across the table from the arm (metres, robot base frame)
@@ -196,6 +203,12 @@ def _centre_fingers(src: str) -> str:
                             .replace(blue, 'rgba="0.13 0.13 0.15 1"'))
         first = finger.index("<geom")
         finger = finger[:first] + wedge + finger[first:]
+        finger, n = re.subn(r'\s*<geom class="sphere_collision"[^>]*/>', "", finger)
+        if n != 6:
+            raise RuntimeError(f"{ARM_XML}: expected 6 stock pads on {down}, found {n}")
+        finger = finger.rstrip() + "".join(
+            f'\n                        <geom class="sphere_collision" pos="{x:g} -0.0004 {z:g}"/>'
+            for z in PAD_ROWS_Z for x in (0.003, -0.003)) + "\n                      "
         src = src[:r0] + linkage + finger + src[d1:]
     for mesh in ("model2__14", "model2__15", "model2__16", "model2__17"):
         tag = f'mesh="{mesh}"/>'
