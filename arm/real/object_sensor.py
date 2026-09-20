@@ -27,25 +27,68 @@ PEOPLE = ["human face", "person"]        # reported separately: they CONFIRM the
 DISTRACTORS = ["hand", "robot gripper", "table", "plate", "laptop", "phone", "cable"]
 
 
+MENU = ["strawberry", "grape", "can"]        # what is on the table today; edit or pass --menu
 RED_FRUIT = {"grape", "strawberry", "cherry", "raspberry", "tomato"}
 
 
+_CLIP = {}
+
+
+def _clip_probs(crops_bgr, labels):
+    """Zero-shot CLIP (ViT-B/32, already installed for YOLO-World) on tight crops. Measured on this camera: strawberry
+    0.84-0.94, grape 1.00 on ~50 px fruit that YOLO-World scores at 0.01-0.07."""
+    import clip
+    import cv2
+    import torch
+    from PIL import Image
+    if "m" not in _CLIP:
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        _CLIP["m"], _CLIP["prep"] = clip.load("ViT-B/32", device=dev); _CLIP["dev"] = dev
+    key = tuple(labels)
+    if _CLIP.get("key") != key:
+        with torch.no_grad():
+            T = _CLIP["m"].encode_text(clip.tokenize(["a close-up photo of a " + l for l in labels]).to(_CLIP["dev"]))
+        _CLIP["T"], _CLIP["key"] = T / T.norm(dim=-1, keepdim=True), key
+    ims = torch.stack([_CLIP["prep"](Image.fromarray(cv2.cvtColor(cv2.resize(c, (224, 224), interpolation=cv2.INTER_CUBIC), cv2.COLOR_BGR2RGB))) for c in crops_bgr])
+    with torch.no_grad():
+        I = _CLIP["m"].encode_image(ims.to(_CLIP["dev"])); I = I / I.norm(dim=-1, keepdim=True)
+        return (100 * I @ _CLIP["T"].T).softmax(-1).float().cpu().numpy()
+
+
 def red_fruit_box(frame_bgr, target):
-    """Saturated-red blobs. The camera renders a red grape and a strawberry the same dark red (hue and BGR within
-    noise), so they are told apart by SIZE: with two in view the strawberry is the larger; with one, it is taken to be
-    the food that was asked for. Returns (x1, y1, x2, y2) or None."""
+    """Small red fruit on the table: colour proposes, CLIP decides.
+      1. saturated-red blobs of a plausible size,
+      2. kept only if what SURROUNDS them is table (pale, unsaturated) - a brown wooden wall passes a red threshold
+         and CLIP happily calls a patch of it 'grape',
+      3. each survivor is cropped tight, enlarged, and classified strawberry / grape / cherry tomato by CLIP.
+    Returns the box of the candidate most confidently the target (>= 0.6), else None."""
     import cv2
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
     red = cv2.inRange(hsv, (0, 90, 40), (12, 255, 255)) | cv2.inRange(hsv, (160, 90, 40), (180, 255, 255))
     red = cv2.morphologyEx(red, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
     n, _, st, _ = cv2.connectedComponentsWithStats(red)
     H, W = red.shape
-    blobs = [st[i] for i in range(1, n) if 250 < st[i, 4] < 0.05 * H * W and st[i, 2] < 3 * st[i, 3] and st[i, 3] < 3 * st[i, 2]]
-    if not blobs:
+    table = (hsv[..., 1] < 70) & (hsv[..., 2] > 110)
+    cands = []
+    for i in range(1, n):
+        x, y, w, h, a = st[i]
+        if not (250 < a < 0.05 * H * W) or w > 3 * h or h > 3 * w:
+            continue
+        m = int(0.5 * max(w, h))
+        x0, y0, x1, y1 = max(0, x - m), max(0, y - m), min(W, x + w + m), min(H, y + h + m)
+        ring = np.ones((y1 - y0, x1 - x0), bool); ring[y - y0:y - y0 + h, x - x0:x - x0 + w] = False
+        if table[y0:y1, x0:x1][ring].mean() < 0.6:
+            continue
+        m2 = int(0.35 * max(w, h))
+        cands.append(((float(x), float(y), float(x + w), float(y + h)), frame_bgr[max(0, y - m2):y + h + m2, max(0, x - m2):x + w + m2]))
+    if not cands:
         return None
-    blobs.sort(key=lambda b: -b[4])
-    b = blobs[0] if (target != "grape" or len(blobs) == 1) else blobs[1]
-    return float(b[0]), float(b[1]), float(b[0] + b[2]), float(b[1] + b[3])
+    # Only what is actually on the table competes. With every red fruit as a label the strawberry came out 'raspberry'
+    # (0.72) and the grape 'cherry' (0.96); between just strawberry and grape they score 0.84-0.94 and 1.00.
+    labels = sorted(set(MENU) & RED_FRUIT | {target})
+    p = _clip_probs([c for _, c in cands], labels)[:, labels.index(target)]
+    k = int(np.argmax(p))
+    return cands[k][0] if p[k] >= 0.6 else None
 
 
 @dataclass
