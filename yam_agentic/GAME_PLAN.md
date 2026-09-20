@@ -27,6 +27,13 @@ policy trained in simulation on this arm, this task and this user, distilled fro
 `sim/yam_expert.py`, which already picks all four objects and carries them to a staging point
 15 cm from the mouth.
 
+> **Update 2026-09-20:** the VLA question was re-examined with measurements, not just a
+> literature read — see [`sim_first/VLA_VERDICT.md`](sim_first/VLA_VERDICT.md). Two things below
+> have changed: **X-VLA** (0.9 B, in the `lerobot 0.6.1` already installed here) adapts to a novel
+> single-arm embodiment by design, which removes the "no single-arm YAM checkpoint" objection; and
+> the sim-first ACT track this plan rests on has a measured bug — the policy scores worse than
+> not moving the arm. Fix that before betting either way.
+
 **Why not download a VLA:**
 
 - No single-arm YAM checkpoint exists. ABC, MolmoAct 2 and GR00T N1.7 are all bimanual YAM with

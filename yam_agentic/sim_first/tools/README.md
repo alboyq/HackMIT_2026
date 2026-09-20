@@ -48,6 +48,26 @@ produced every wrong conclusion in this investigation.
 Run `expert_ceiling.py` before believing any policy score — it separates "the policy is bad"
 from "the test is impossible".
 
+## Why the learned policy fails (2026-09-20) — see [`../VLA_VERDICT.md`](../VLA_VERDICT.md)
+
+| script | answers | measured |
+|---|---|---|
+| `baselines.py` | what a fit number should be compared against | hold-still **1.73°**, constant-velocity **1.20°** — not the mean-action **14.05°** the project had been using. `--mlp` adds a no-camera MLP at **0.62°** in ~17 s |
+| `act_mae.py` | is the checkpoint better than those | `yam_v9/step_12000` = **2.70°** vs hold-still 1.95° on its own training frames — **worse than freezing the arm** |
+| `attribution.py` | is the policy using its cameras | yes: shuffling the scene image moves the prediction 7.28°, the wrist image 3.79°. Not a blindness problem |
+| `divergence.py` | where the rollout leaves the expert | teacher-forced **0.05–0.3°**, closed-loop gap **9.5°** by tick 28 — compounding error, not capacity |
+| `prompt_manifold.py` | is the fit floor irreducible, and would more data close it | no ambiguity (intercept ≈ 0); Lipschitz 3.7–3.9°/sd-unit, intrinsic dim ~6 → **1.5° needs ~340× the data**. That option is dead |
+
+The order to run them in is the order above: baselines first (it reframes every other number),
+then `act_mae.py`, then `divergence.py`. The policy tools need `torch` and `lerobot`, and
+`divergence.py` needs the same `YAM_*` scene env the run trained under.
+
+```bash
+python tools/baselines.py <run>/demos --shards 3 --mlp
+python tools/act_mae.py <run>/act/step_12000 <run>/demos
+YAM_AUG_PROFILE=real YAM_TARGETS=apple,can python tools/divergence.py <run>/mlp/mlp.pt
+```
+
 ## Verifying the gripper end to end
 
 ```bash

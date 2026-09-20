@@ -7,6 +7,8 @@ action) once per tick. Pick -> carry -> stop 15 cm short of the mouth -> hold. O
 end with the object held at the staging point are kept ("filtered demos").
 
 Usage: gen_demos_yam.py OUT_DIR [episodes] [--workers 14] [--seed0 1000000] [--film 2]
+Env:   YAM_DART_DEG=<sigma>  DART noise injection for corrective data (0 = off, the default).
+       See ../VLA_VERDICT.md section 4: without it the set contains no recovery behaviour.
 Output: OUT_DIR/shard_XX.npz  (scene u8 NxHxWx3, wrist u8, state f32 Nx17, action f32 Nx7, episode i64)
 """
 import argparse
@@ -18,6 +20,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HOLD_S, SETTLE_TICKS = 1.0, 3
+# DART (Laskey et al. 2017, https://arxiv.org/abs/1703.09327): execute a DISTURBED action but
+# keep the plan's own target as the label. Degrees of Gaussian noise per joint per tick; 0 = off.
+DART = float(os.environ.get("YAM_DART_DEG", "0")) * 3.141592653589793 / 180.0
 
 
 def run_episode(sc, ex, seed, np, mujoco):
@@ -35,6 +40,7 @@ def run_episode(sc, ex, seed, np, mujoco):
     sim_dt = sc.model.opt.timestep
     S, W, X, A = [], [], [], []
     prev = hold.copy()
+    rng = np.random.default_rng(seed ^ 0x5EED)
 
     def play(traj):
         nonlocal prev
@@ -44,8 +50,14 @@ def run_episode(sc, ex, seed, np, mujoco):
             act = np.concatenate([c[:6], [c[6] / GRIP_CTRL_OPEN]]).astype(np.float32)
             scene, wrist, state = sc.observe()
             S.append(scene); W.append(wrist); X.append(state); A.append(act)
-            sc.tick(act, prev)
-            prev = act
+            # The label is an ABSOLUTE joint target, so it stays correct from wherever the
+            # disturbance puts the arm. That is what makes corrective data free here: a
+            # plan-then-replay expert cannot otherwise show the policy how to recover.
+            run = act.copy()
+            if DART:
+                run[:6] += rng.normal(0, DART, 6).astype(np.float32)
+            sc.tick(run, prev)
+            prev = run
 
     z0 = sc.object_pos(target)[2]
     play(ex.trajectory(plan, sim_dt))

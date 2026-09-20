@@ -13,6 +13,39 @@ chunk length, temporal ensembling, or visual variance — each was ruled out by 
 lists how so nobody repeats them. The live hypothesis is simply **optimiser steps**: the model's
 fit improves ~x0.75 per doubling of steps with no plateau, and no run has had enough.
 
+> ## ⚠️ CORRECTION, 2026-09-20 evening — read [`VLA_VERDICT.md`](VLA_VERDICT.md) before §2
+>
+> §2's whole argument is measured against a **baseline that does not apply to this problem**, so
+> its conclusions do not hold. Corrected, on the same checkpoints and frames:
+>
+> | | |
+> |---|---|
+> | the baseline §2 uses ("predict the mean action") | 14.05° |
+> | **ACT `yam_v9/step_12000`, on its own training frames** | **2.70°** |
+> | **predict the current joint angles — i.e. do not move** | **1.95°** |
+> | constant-velocity extrapolation | 1.20° |
+> | **a 3-layer MLP on 13 numbers, NO cameras, 17 s of training** | **0.62°** |
+>
+> The policy is **worse than freezing the arm**, and is beaten 4× by a model that cannot see.
+> So "the ~3° floor is invariant" was never a floor — it is a model that has not converged
+> (12 k steps × batch 8 = **0.56 epochs**), trained with `ACTConfig`'s declared MEAN_STD
+> normalisation **silently never applied**, because LeRobot 0.6 moved normalisation into a
+> processor pipeline `train_act_yam.py` does not build.
+>
+> The VERDICT block at the end of §2 ("the floor is invariant, stop configuring, change the
+> design") is therefore **withdrawn**, and so is item 2 of its list — `prompt_manifold.py` prices
+> "orders more data" at **~340× (≈ 530 k episodes, ~80 h, ~12 TB)**, so that option was dead
+> anyway, for an unrelated reason.
+>
+> **What replaces it.** Fixing the fit is necessary but not sufficient: the 0.62° MLP still
+> scores **2 %** closed-loop, and fails identically on *training* seeds with *training*
+> backgrounds. `tools/divergence.py` shows why — teacher-forced error **0.05–0.3°**, closed-loop
+> divergence **9.5°** by tick 28. It is compounding error / covariate shift, and it reproduces on
+> a model 100× smaller than ACT, so **it would reproduce on a VLA too.**
+>
+> Ordered plan, gates and the VLA survey: [`VLA_VERDICT.md`](VLA_VERDICT.md) §8.
+> **Do not steer by open-loop MAE** — DART data made MAE 4× worse and closed-loop no worse.
+
 ---
 
 ## 1. RESOLVED: the linear_4310 gripper now grasps
