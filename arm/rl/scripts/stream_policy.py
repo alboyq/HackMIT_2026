@@ -35,6 +35,24 @@ from hackmit_rl.envs import OpenYAMFeedEnv
 STEPS = re.compile(r"_(\d+)_steps\.zip$")
 PHASE = {0: "APPROACH", 1: "CLOSE", 2: "SECURE"}
 
+def chain_stage(runs_dir: Path) -> str | None:
+    """Whichever stage the chain last announced. The chain log is the authority on that --
+    guessing from checkpoint mtimes races the writer."""
+    log = runs_dir / "chain.log"
+    if not log.exists():
+        return None
+    stage = None
+    try:
+        for line in log.read_text(errors="ignore").splitlines():
+            # "[chain] 20:16:12 starting grasp (3000000 steps) from ..." -- the timestamp
+            # sits between the tag and the verb, so match on the verb alone.
+            if " starting " in line:
+                stage = line.split(" starting ", 1)[1].split()[0]
+    except OSError:
+        return None
+    return stage
+
+
 def train_stats(run_dir: Path, stage: str) -> str:
     """Scrape the trainer's own log. It is the only place SB3 reports rollout stats, and
     reading it costs the trainer nothing."""
@@ -152,6 +170,8 @@ def main() -> None:
     ap.add_argument("--cam", default="scene_cam", choices=["scene_cam", "wrist_cam"])
     ap.add_argument("--fps", type=float, default=25.0)
     ap.add_argument("--follow", action="store_true")
+    ap.add_argument("--auto-stage", action="store_true",
+                    help="follow the curriculum: switch stage when the chain does")
     args = ap.parse_args()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
@@ -160,17 +180,25 @@ def main() -> None:
           flush=True)
 
     cfg = load_config(args.config)
-    cfg["env"]["stage"] = args.stage
+    stage = args.stage
+    runs_dir = args.run_dir.parent
+    if args.auto_stage:
+        found = chain_stage(runs_dir)
+        if found:
+            stage = found
+            args.run_dir = runs_dir / f"feed-{stage}"
+            print(f"[stream] auto-stage: following {stage}", flush=True)
+    cfg["env"]["stage"] = stage
     raw = DummyVecEnv([lambda: OpenYAMFeedEnv(cfg)])
     inner = raw.envs[0]
     # A fresh run has no checkpoint for the first ~30 s; wait rather than die.
     while True:
         try:
-            ck, vn, steps = newest(args.run_dir, args.stage)
+            ck, vn, steps = newest(args.run_dir, stage)
             break
         except SystemExit:
-            _status["text"] = f"waiting for the first {args.stage} checkpoint..."
-            print(f"[stream] waiting for a {args.stage} checkpoint", flush=True)
+            _status["text"] = f"waiting for the first {stage} checkpoint..."
+            print(f"[stream] waiting for a {stage} checkpoint", flush=True)
             time.sleep(10)
     env = VecNormalize.load(str(vn), raw)
     env.training, env.norm_reward = False, False
@@ -182,9 +210,37 @@ def main() -> None:
     recent: list[bool] = []          # rolling window, so improving checkpoints show through
     period = 1.0 / max(1e-3, args.fps)
     while True:
+        # Has the curriculum moved on? Swap the whole env, not just the weights: a later
+        # stage is a different task, and replaying it under the old stage would be wrong.
+        if args.auto_stage:
+            found = chain_stage(runs_dir)
+            if found and found != stage:
+                print(f"[stream] stage changed {stage} -> {found}", flush=True)
+                _status["text"] = f"switching to {found}..."
+                try:
+                    env.close()
+                except Exception:
+                    pass
+                stage = found
+                args.run_dir = runs_dir / f"feed-{stage}"
+                cfg["env"]["stage"] = stage
+                raw = DummyVecEnv([lambda: OpenYAMFeedEnv(cfg)])
+                inner = raw.envs[0]
+                while True:
+                    try:
+                        ck, vn, steps = newest(args.run_dir, stage)
+                        break
+                    except SystemExit:
+                        _status["text"] = f"waiting for the first {stage} checkpoint..."
+                        time.sleep(8)
+                env = VecNormalize.load(str(vn), raw)
+                env.training, env.norm_reward = False, False
+                model = PPO.load(ck, device="cpu")
+                recent.clear()
+                episode = 0
         if args.follow and episode:
             try:
-                nck, nvn, steps = newest(args.run_dir, args.stage)
+                nck, nvn, steps = newest(args.run_dir, stage)
                 if nck != ck:
                     ck = nck
                     model = PPO.load(ck, device="cpu")
@@ -199,7 +255,7 @@ def main() -> None:
             obs, _, done, infos = env.step(a)
             info = infos[0]
             img = cv2.cvtColor(inner.scene.render(args.cam, 480), cv2.COLOR_RGB2BGR)
-            lines = [f"{args.stage}  ep{episode}  {PHASE.get(info.get('phase', 0), '?')}",
+            lines = [f"{stage}  ep{episode}  {PHASE.get(info.get('phase', 0), '?')}",
                      f"target {info.get('object', '?')}  d={info.get('distance', 0):.3f}m",
                      f"grip {info.get('grip_fraction', 0):.2f}  "
                      f"qvel {info.get('joint_speed', 0):.2f}  "
@@ -213,7 +269,7 @@ def main() -> None:
                 with _frame_lock:
                     _frame = buf.tobytes()
             if i % 10 == 0:
-                _train_text["v"] = train_stats(args.run_dir, args.stage)
+                _train_text["v"] = train_stats(args.run_dir, stage)
             rate = f"{sum(recent)}/{len(recent)}" if recent else "-"
             _status["text"] = (f"WATCHING {ck.name}  |  ep {episode}  |  last-20 {rate}"
                                f"  |  step {i}\n{_train_text['v']}")

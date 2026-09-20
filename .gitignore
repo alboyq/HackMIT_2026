@@ -7,3 +7,5 @@ arm/rl/logs/
 reports/*.json
 *.mp4
 *.zip
+runs/
+MUJOCO_LOG.TXT
