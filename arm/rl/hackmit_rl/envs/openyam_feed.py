@@ -120,6 +120,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.self_collisions = self.curl_steps = 0
         self.knocked = self.was_pinched = False
         self.phase = 0
+        self.settle_calm = 0.0
         self.prev_dist = 0.0
         self.object_start = np.zeros(3)
         self.obj_bias = np.zeros(3)
@@ -252,22 +253,30 @@ class OpenYAMFeedEnv(gym.Env):
             self.rest_z[obj] = self.base_rest_z[obj] * scale
             self.width[obj] = self.base_width[obj] * scale
 
-        # Rejection-sample so nothing spawns overlapping: two objects shoving each other apart
-        # on step 0 is not randomisation, it is noise the policy cannot act on.
-        placed: list[tuple[str, np.ndarray]] = []
+        # One angular SLOT per object, shuffled, with jitter inside the slot. Structural
+        # separation: rejection sampling could not honour the spacing inside a narrow arc and
+        # quietly fell back to overlapping positions.
         lo_a, hi_a = self.ecfg["object_angle_range_rad"]
         margin = float(self.ecfg["object_spacing_m"])
-        for obj in OBJECTS:
-            for _ in range(60):
-                radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
-                angle = self.np_random.uniform(lo_a, hi_a)
-                point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
-                clear = all(
-                    float(np.linalg.norm(point - other)) >
-                    0.5 * (self.width[obj] + self.width[name]) + margin
-                    for name, other in placed)
-                if clear:
+        n_obj = len(OBJECTS)
+        edges = np.linspace(float(lo_a), float(hi_a), n_obj + 1)
+        order = self.np_random.permutation(n_obj)
+        placed: list[tuple[str, np.ndarray]] = []
+        for obj, slot in zip(OBJECTS, order):
+            lo_s, hi_s = edges[slot], edges[slot + 1]
+            pad = 0.12 * (hi_s - lo_s)                      # keep off the slot boundaries
+            angle = self.np_random.uniform(lo_s + pad, hi_s - pad)
+            radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
+            point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
+            # If a slot neighbour still lands too close, push this one out along its own ray.
+            for _ in range(12):
+                tight = [other for name, other in placed
+                         if float(np.linalg.norm(point - other))
+                         < 0.5 * (self.width[obj] + self.width[name]) + margin]
+                if not tight:
                     break
+                radius = min(radius + 0.02, float(self.ecfg["object_radius_range_m"][1]))
+                point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
             placed.append((obj, point))
             adr = self.obj_qadr[obj]
             self.data.qpos[adr:adr + 3] = [point[0], point[1], self.rest_z[obj]]
@@ -276,7 +285,7 @@ class OpenYAMFeedEnv(gym.Env):
             self.data.qvel[vadr:vadr + 6] = 0.0                          # and not spinning
         mujoco.mj_forward(self.model, self.data)
 
-        # Let everything come to rest before the episode starts, with the arm held where it is.
+        # Let everything come to rest        # Let everything come to rest before the episode starts, with the arm held where it is.
         hold = self.data.ctrl.copy()
         for _ in range(int(self.ecfg["settle_steps"])):
             self.data.ctrl[:] = hold
@@ -308,6 +317,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.self_collisions = self.curl_steps = 0
         self.knocked = self.was_pinched = False
         self.phase = 0
+        self.settle_calm = 0.0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self._sample_perception_bias()
@@ -384,6 +394,11 @@ class OpenYAMFeedEnv(gym.Env):
                        and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
             self.hold_steps = self.hold_steps + 1 if settled else 0
             success = self.hold_steps >= round(float(self.ecfg["reach_settle_s"]) / self.dt)
+            # Measured here, PAID below once `reward` exists. Inside tolerance, being slow
+            # pays in proportion, so the policy can descend into the settle gate rather than
+            # having to stumble onto it.
+            self.settle_calm = (1.0 - min(1.0, joint_speed / float(self.ecfg["reach_settle_qvel"]))
+                                if distance <= float(self.ecfg["success_distance_m"]) else 0.0)
         elif self.stage == "grasp":
             settled = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2])) <= float(
                 self.ecfg["grasp_max_displacement_m"])
@@ -453,6 +468,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.was_pinched = pinched
 
         # ---------------------------------------------------------------- always-on costs
+        if self.stage == "reach" and self.settle_calm:
+            reward += float(self.ecfg["settle_bonus"]) * self.settle_calm
         # Time costs. Without it, any per-step bonus makes loitering profitable.
         reward -= float(self.ecfg["time_penalty"])
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()

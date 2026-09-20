@@ -8,9 +8,10 @@ env:
   episode_steps: 300           # present needs time to reach, grasp, lift AND carry
   success_distance_m: 0.035
   # Reach must ARRIVE AND STOP, so grasp starts from rest.
-  reach_settle_qvel: 0.10        # rad/s, worst joint
-  reach_settle_speed_mps: 0.03
-  reach_settle_s: 0.20     # 2 cm was tight for a 6-DoF arm under a velocity cap
+  reach_settle_qvel: 0.20        # rad/s worst joint; 0.10 was below what it can hold
+  reach_settle_speed_mps: 0.05
+  reach_settle_s: 0.15
+  settle_bonus: 0.25           # pays for slowing down once in tolerance     # 2 cm was tight for a 6-DoF arm under a velocity cap
 
   # Control / safety envelope
   action_delta_rad: 0.02
@@ -32,10 +33,10 @@ env:
   # Scene randomisation: top-down band from MEASUREMENTS.md, plus per-episode re-sizing
   object_radius_range_m: [0.25, 0.45]
   object_scale_range: [0.75, 1.30]
-  object_spacing_m: 0.05       # clear gap between objects, so none spawn overlapping
+  object_spacing_m: 0.12       # real setup will not crowd them; do not train on packed scenes
   settle_steps: 40             # let them come to rest before the episode starts
-  pad_clearance_m: 0.008       # keep the widest axis this far inside the 83 mm pad opening
-  object_angle_range_rad: [-0.55, 0.55]
+  pad_clearance_m: 0.018       # 4 mm per side vs 17.5 mm perception error was unwinnable
+  object_angle_range_rad: [-0.95, 0.95]   # wide enough that the spacing above fits
   home_qpos: [-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637]
   # PHASE gates: over the object and at grasp height before closing counts for anything
   align_xy_m: 0.035
