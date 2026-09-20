@@ -40,10 +40,9 @@ WINDOW = "YAM policy"
 def newest_checkpoint(run_dir: Path, stage: str):
     """Newest (model, vecnormalize) pair; a final/paused save wins over a periodic one."""
     stats_top = run_dir / "vecnormalize.pkl"
-    for name in (f"ppo_{stage}_final.zip", f"ppo_{stage}_paused.zip"):
-        top = run_dir / name
-        if top.exists() and stats_top.exists():
-            return top, stats_top, None
+    top = run_dir / f"ppo_{stage}_final.zip"
+    if top.exists() and stats_top.exists():
+        return top, stats_top, None
     best = None
     for zip_path in (run_dir / "checkpoints").glob(f"ppo_{stage}_*_steps.zip"):
         match = STEPS.search(zip_path.name)
@@ -54,6 +53,12 @@ def newest_checkpoint(run_dir: Path, stage: str):
                          .replace(f"ppo_{stage}_", f"ppo_{stage}_vecnormalize_"))
         if stats.exists() and stats.stat().st_size and zip_path.stat().st_size and (best is None or int(match.group(1)) > best[0]):
             best = (int(match.group(1)), zip_path, stats)
+    # A `paused` save is only the newest thing until training resumes. Preferring it blindly
+    # pinned the viewers to a stale snapshot while the trainer ran on for 400k+ steps.
+    paused = run_dir / f"ppo_{stage}_paused.zip"
+    if paused.exists() and stats_top.exists() and (
+            best is None or paused.stat().st_mtime > best[1].stat().st_mtime):
+        return paused, stats_top, None
     if best is None:
         raise SystemExit(f"no checkpoint for stage {stage!r} in {run_dir}")
     return best[1], best[2], best[0]

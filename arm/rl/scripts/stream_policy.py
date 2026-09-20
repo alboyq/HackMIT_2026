@@ -147,16 +147,21 @@ class Handler(BaseHTTPRequestHandler):
 
 def newest(run_dir: Path, stage: str):
     stats_top = run_dir / "vecnormalize.pkl"
-    for name in (f"ppo_{stage}_final.zip", f"ppo_{stage}_paused.zip"):
-        if (run_dir / name).exists() and stats_top.exists():
-            return run_dir / name, stats_top, None
+    if (run_dir / f"ppo_{stage}_final.zip").exists() and stats_top.exists():
+        return run_dir / f"ppo_{stage}_final.zip", stats_top, None
     best = None
     for z in (run_dir / "checkpoints").glob(f"ppo_{stage}_*_steps.zip"):
         m = STEPS.search(z.name)
         vn = z.with_name(z.name.replace("_steps.zip", "_steps.pkl")
                           .replace(f"ppo_{stage}_", f"ppo_{stage}_vecnormalize_"))
-        if m and vn.exists() and (best is None or int(m.group(1)) > best[0]):
+        if m and vn.exists() and z.stat().st_size and vn.stat().st_size and (best is None or int(m.group(1)) > best[0]):
             best = (int(m.group(1)), z, vn)
+    # A `paused` save is only the newest thing until training resumes. Preferring it blindly
+    # pinned the viewers to a stale snapshot while the trainer ran on for 400k+ steps.
+    paused = run_dir / f"ppo_{stage}_paused.zip"
+    if paused.exists() and stats_top.exists() and (
+            not best or paused.stat().st_mtime > best[1].stat().st_mtime):
+        return paused, stats_top, None
     if not best:
         raise SystemExit(f"no checkpoint for {stage} in {run_dir}")
     return best[1], best[2], best[0]
