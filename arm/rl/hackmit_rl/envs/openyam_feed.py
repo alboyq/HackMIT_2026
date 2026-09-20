@@ -524,6 +524,7 @@ class OpenYAMFeedEnv(gym.Env):
         else:
             self.target = obj_pos
 
+        tcp_vxy = float(np.linalg.norm((tcp - self.prev_tcp)[:2]) / self.dt)   # sideways only
         tcp_speed = float(np.linalg.norm(tcp - self.prev_tcp) / self.dt)
         self.prev_tcp = tcp.copy()
         if self.stage == "present":
@@ -720,6 +721,8 @@ class OpenYAMFeedEnv(gym.Env):
                 # All three are COSTS. Sideways travel, going past the band, and moving once up.
                 # The speed cost fades in with height so there is no cliff to stall beneath.
                 self.was_lifted |= bool(carrying)
+                # Holding the object, the hand goes UP and nowhere else.
+                reward -= float(self.ecfg["horizontal_speed_penalty"]) * tcp_vxy
                 reward -= float(self.ecfg["drift_penalty"]) * stage_drift
                 reward -= float(self.ecfg["overshoot_penalty"]) * max(
                     0.0, height - lift_h - float(self.ecfg["lift_band_m"]))

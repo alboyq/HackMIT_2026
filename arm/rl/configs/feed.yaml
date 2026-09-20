@@ -81,8 +81,8 @@ env:
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.10          # clearly off the table, not grazing it
   lift_hold_s: 0.5
-  pick_max_drift_m: 0.05       # held at height within this of where the grab began
-  pick_abort_drift_m: 0.09     # once pinched, past this the pick-up has failed
+  pick_max_drift_m: 0.03       # held at height within this of where the grab began
+  pick_abort_drift_m: 0.06     # once pinched, past this the pick-up has failed
   lift_band_m: 0.06            # stop between lift_height_m and this much above it
   lift_max_drift_m: 0.03       # straight up: the object may not wander sideways
   lift_abort_drift_m: 0.10     # past this the lift has failed; end the episode
@@ -100,7 +100,8 @@ env:
                                # 4 mm/step, so a correct lift is clearly positive after time and
                                # drift costs (at 30 it netted ~0, at 10 nobody went up at all).
   pinch_once_bonus: 2.0        # grab stage: the seated pinch is a milestone, not an income
-  drift_penalty: 2.0           # per metre sideways per step while lifting: a cost
+  drift_penalty: 8.0           # per metre sideways per step while lifting: a cost
+  horizontal_speed_penalty: 1.5   # per m/s of sideways hand speed while holding: lift is vertical only
   overshoot_penalty: 2.0       # per metre above the band
   hover_speed_penalty: 0.05    # at height, moving costs and being still is free
   carry_bonus: 0.0             # was per-step rent: with lead_bonus, 105 an episode vs success 50
