@@ -66,7 +66,7 @@ def backproject(rows, cols, depths, K) -> np.ndarray:
     return np.stack([x, y, np.asarray(depths, float)], axis=1)
 
 
-def masked_points(depth, conf, mask, K, min_conf=CONF_HIGH) -> tuple[np.ndarray, float]:
+def masked_points(depth, conf, mask, K, min_conf=CONF_MEDIUM) -> tuple[np.ndarray, float, float]:
     """Camera-frame points under `mask`, keeping only confident returns.
 
     Returns the points and the fraction of masked pixels that survived -- a low fraction is
@@ -80,8 +80,10 @@ def masked_points(depth, conf, mask, K, min_conf=CONF_HIGH) -> tuple[np.ndarray,
     if conf is not None:
         good &= conf >= min_conf
     rows, cols = np.nonzero(good)
-    frac = float(good.sum()) / max(int(mask.sum()), 1)
-    return backproject(rows, cols, depth[good], K), frac
+    denom = max(int(mask.sum()), 1)
+    frac = float(good.sum()) / denom
+    high = float((good & (conf >= CONF_HIGH)).sum()) / denom if conf is not None else frac
+    return backproject(rows, cols, depth[good], K), frac, high
 
 
 def mask_to_depth_grid(mask, depth_shape) -> np.ndarray:
@@ -124,14 +126,14 @@ def _depth_split(d, gap_m=0.04):
 
 
 def profile(depth, conf, mask, K_depth, *, rgb_mask=None, K_rgb=None,
-            min_conf=CONF_HIGH) -> ObjectProfile | None:
+            min_conf=CONF_MEDIUM) -> ObjectProfile | None:
     """Build an ObjectProfile from a depth-grid mask, optionally refining extent from RGB.
 
     `mask` must be on the depth grid. Pass `rgb_mask` and `K_rgb` to take the extent from the
     full-resolution colour frame, which is 7.5x finer and the only way a small object gets a
     believable size.
     """
-    pts, frac = masked_points(depth, conf, mask, K_depth, min_conf)
+    pts, frac, high_frac = masked_points(depth, conf, mask, K_depth, min_conf)
     if len(pts) < MIN_DEPTH_POINTS:
         return None
 
@@ -168,7 +170,13 @@ def profile(depth, conf, mask, K_depth, *, rgb_mask=None, K_rgb=None,
     order = np.argsort(extent)[::-1]
     axes, extent = axes[order], extent[order]
 
-    confidence = float(np.clip(frac, 0, 1) * min(1.0, len(pts) / 80.0) * (0.4 if bimodal else 1.0))
+    # Medium-confidence returns are kept, and quality is carried in this number instead of
+    # being enforced by a hard cut. Demanding CONF_HIGH discarded a real object whose 1139
+    # medium returns were perfectly usable; a surface that genuinely cannot be measured shows
+    # up as a low `frac`, which this already penalises.
+    quality = 0.6 + 0.4 * (high_frac / frac if frac > 0 else 0.0)
+    confidence = float(np.clip(frac, 0, 1) * quality
+                       * min(1.0, len(pts) / 80.0) * (0.4 if bimodal else 1.0))
 
     return ObjectProfile(
         n_points=len(pts), valid_fraction=frac,

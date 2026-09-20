@@ -25,7 +25,7 @@ env:
     max_steps: 150             # per prior stage; reach takes 21-80
     retries: 4                 # re-deal the scene if a prior stage fails, then give up loudly
     runs: {reach: runs/feed-reach, grasp: runs/feed-grasp}   # lift is folded into grasp
-    sensors_only: true         # decide 'reach has arrived' from camera + motor feedback, not sim truth
+    sensors_only: true
     reuse_prob: 0.90           # restore a recent hand-off state instead of replaying reach;
     bank: 24                   # one env resetting stalls all 20 (measured load 3.7 of 20)
 
@@ -50,9 +50,9 @@ env:
   object_radius_range_m: [0.25, 0.45]
   object_scale_range: [0.75, 1.30]
   patient_hand_slab: false     # the IK track's table slab; not part of this patient
-  strict_first_look: true      # nothing is known about a target until the wrist camera has seen it
-  nominal_object: [0.35, 0.0, 0.03]    # prior until then: mid-table
-  nominal_mouth: [0.531, 0.0, 0.372]   # prior until then: the marked seat
+  strict_first_look: true
+  nominal_object: [0.35, 0.0, 0.03]
+  nominal_mouth: [0.531, 0.0, 0.372]
   head_scale_range: [0.92, 1.08]   # a different-sized head every episode
   small_object_prob: 0.35      # apple -> strawberry-sized, block -> bite-sized cube, this often
   small_scale_range: [0.45, 0.60]   # x the nominal size; mass follows scale**3
@@ -91,6 +91,8 @@ env:
   hold_seat_frac: 0.3          # once pinched seated, the object may settle this far toward the tips
   min_seat_frac: 0.6           # a grasp counts only with the object this deep between the claws
   seat_penalty: 0.10           # pulls the gripper base toward the object before closing
+  grasp_success_mode: pinch    # fine-tune target for the hybrid: a seated pinch, held 0.3 s
+  pinch_hold_s: 0.3
   grasp_hold_s: 0.7            # a grab is a pick-up HELD still at height, or it is a fail
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.10          # clearly off the table, not grazing it

@@ -277,6 +277,13 @@ class OpenYAMFeedEnv(gym.Env):
         self.seen[jitter_key] = self._in_wrist_view(true_point)
         if not self.seen[jitter_key] and jitter_key in self._last_seen:
             return self._last_seen[jitter_key]
+        if not self.seen[jitter_key] and bool(self.ecfg.get("strict_first_look", False)):
+            # Never seen and not in view: the real arm knows NOTHING yet. It gets a fixed prior - the middle of
+            # the table for food, the marked seat for the person - until the camera actually sees the thing.
+            # (Before this, the first reading of every episode was the truth-plus-noise even with the target out
+            # of frame, which stood in for a scan pose nobody had built.)
+            prior = self.ecfg["nominal_mouth"] if jitter_key == "mouth_jitter_m" else self.ecfg["nominal_object"]
+            return np.asarray(prior, dtype=np.float64)
         self._last_seen[jitter_key] = self._perceived_now(true_point, bias, jitter_key)
         return self._last_seen[jitter_key]
 
@@ -492,6 +499,7 @@ class OpenYAMFeedEnv(gym.Env):
         for stage, policy, mean, std, clip in self._priors:
             self._begin_stage(stage)
             obs = self._observation()
+            sensed = 0
             for _ in range(int(self.handoff.get("max_steps", 150))):
                 action, _ = policy.predict(np.clip((obs - mean) / std, -clip, clip)[None],
                                            deterministic=True)
@@ -499,9 +507,32 @@ class OpenYAMFeedEnv(gym.Env):
                 self.handoff_steps += 1
                 if self.prior_hook is not None:
                     self.prior_hook(self)
+                if bool(self.handoff.get("sensors_only", False)) and stage == "reach":
+                    # Decide 'I have arrived' the way the real arm must: the CAMERA's estimate of the gap
+                    # (obs[13:16] is target_seen - tcp), the MOTORS' reported speeds, and the arm's own FK for
+                    # hand speed and tilt. The object must actually be in view. No simulator truth.
+                    arrived = (float(np.linalg.norm(obs[13:16])) <= float(self.ecfg["success_distance_m"])
+                               and float(np.abs(obs[6:12]).max()) <= float(self.ecfg["reach_settle_qvel"])
+                               and info["tcp_speed_mps"] <= float(self.ecfg["reach_settle_speed_mps"])
+                               and info["tilt_deg"] <= float(self.ecfg["max_tilt_deg"])
+                               # squared to a box: its orientation comes from the outline of the detection
+                               # (cv2.minAreaRect on the real arm), modelled here as the truth +- 5 deg
+                               and (info["off_square_deg"] + abs(float(self.np_random.normal(0.0, 5.0)))
+                                    <= float(self.ecfg["max_off_square_deg"]))
+                               and bool(self.seen.get("object_jitter_m", False)))
+                    sensed = sensed + 1 if arrived else 0
+                    if sensed >= round(float(self.ecfg["reach_settle_s"]) / self.dt):
+                        info = dict(info, success=True)
+                        break
+                    if truncated or info.get("failed"):
+                        break
+                    continue
                 if done or truncated:
                     break
-            if not info["success"]:
+            if bool(self.handoff.get("sensors_only", False)) and stage == "reach":
+                if sensed < round(float(self.ecfg["reach_settle_s"]) / self.dt):
+                    return False                      # never SENSED an arrival: truth does not get a vote
+            elif not info["success"]:
                 return False
         return True
 
@@ -719,8 +750,16 @@ class OpenYAMFeedEnv(gym.Env):
             at_height = carrying and height <= lift_h + float(self.ecfg["lift_band_m"])
             steady = (joint_speed_now <= float(self.ecfg["reach_settle_qvel"])
                       and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
-            self.hold_steps = self.hold_steps + 1 if (at_height and seated and settled and steady) else 0
-            success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
+            if self.ecfg.get("grasp_success_mode", "pickup") == "pinch":
+                # What the HYBRID needs from the learned part: a seated pinch, held. The scripted lift takes
+                # over from there, so asking RL for the lift too (which it never learned) only starves it.
+                good = (pinched and closed and seat_frac >= float(self.ecfg["min_seat_frac"])
+                        and stage_drift <= float(self.ecfg["grasp_max_displacement_m"]))
+                self.hold_steps = self.hold_steps + 1 if good else 0
+                success = self.hold_steps >= round(float(self.ecfg.get("pinch_hold_s", 0.3)) / self.dt)
+            else:
+                self.hold_steps = self.hold_steps + 1 if (at_height and seated and settled and steady) else 0
+                success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
         elif self.stage == "lift":
             # Straight up, then STOP. Present needs a stationary, known starting pose, and an
             # object dragged sideways on the way up is one that was nearly knocked over.

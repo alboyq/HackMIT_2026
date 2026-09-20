@@ -38,7 +38,7 @@ from hybrid_pick import lift_action, shield, shield_cam  # noqa: E402
 from hackmit_rl.config import load_config
 from hackmit_rl.envs import OpenYAMFeedEnv
 
-RUN = sys.argv[1] if len(sys.argv) > 1 else "arm/rl/models/grasp_v1"
+RUN = sys.argv[1] if len(sys.argv) > 1 else "arm/rl/models/grasp_v2"
 N = int(sys.argv[2]) if len(sys.argv) > 2 else 30
 CALIBRATE = os.environ.get("CALIBRATE", "0") == "1"
 CAL_FILE = "arm/rl/configs/feed_calibration.json"
