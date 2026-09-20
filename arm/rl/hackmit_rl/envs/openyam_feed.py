@@ -72,6 +72,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.tip_ahead = None        # fingertip distance past the TCP, measured off the model
         self.was_lifted = False
         self.pinch_paid = False
+        self.max_lift = 0.0
         self._bank = []
         self._last_seen = {}         # what the wrist camera last reported, per target
         self.seen = {}               # and whether it can see each one right now
@@ -382,6 +383,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.prev_tcp = self._tcp().copy()
         self.was_lifted = False
         self.pinch_paid = False
+        self.max_lift = 0.0
         # Each stage is judged on what IT did to the object, not on what it inherited.
         self.stage_object_start = obj_pos.copy()
         self.prev_lift = float(np.clip(obj_pos[2] - self.rest_z[self.name], 0.0,
@@ -803,6 +805,16 @@ class OpenYAMFeedEnv(gym.Env):
             # 4 while parking cost 15, and the policy learned to end episodes by throwing.
             reward -= float(self.ecfg["time_penalty"]) * (int(self.ecfg["episode_steps"]) - self.steps)
         truncated = self.steps >= int(self.ecfg["episode_steps"])
+        if pinched:
+            self.max_lift = max(self.max_lift, height)
+        if self.stage == "grasp" and not success and (failed or truncated):
+            # The worst thing a grab episode can do is end WITHOUT a pick-up, and hovering must be
+            # the worst way to get there. With only the time charge, a failed attempt and a hover
+            # cost the same 15, and once attempts were penalised for sideways drift the policy
+            # collapsed into hovering over the object (seen on the live view at 5.6M steps).
+            # An honest attempt always costs less: a seated pinch and lift progress buy it down.
+            attempt = 0.5 * float(self.pinch_paid) + 0.5 * min(1.0, self.max_lift / lift_h)
+            reward -= float(self.ecfg["no_pickup_penalty"]) * (1.0 - 0.6 * attempt)
         info = {"success": bool(success), "is_success": bool(success), "object": self.name,
                 "distance": distance, "max_joint_velocity": measured_velocity,
                 "peak_joint_velocity": self.peak_velocity, "velocity_cap": cap,

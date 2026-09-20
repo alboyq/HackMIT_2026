@@ -107,3 +107,14 @@ def test_milestones_stay_small(path):
     e = load_config(path)["env"]
     once = float(e["pinch_once_bonus"]) + float(e["lift_progress_gain"]) * float(e["lift_height_m"])
     assert once < 0.2 * float(e["success_bonus"]), f"{path.name}: milestones total {once:.1f}"
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_not_picking_up_is_the_worst_outcome(path):
+    """Hovering must never be the cheap option. It collapsed into exactly that once attempts were
+    penalised and doing nothing was not."""
+    e = load_config(path)["env"]
+    worst_other = max(float(e["lost_penalty"]), float(e["knock_penalty"]), float(e["drop_penalty"]),
+                      float(e["time_penalty"]) * int(e["episode_steps"]))
+    assert float(e["no_pickup_penalty"]) > worst_other
+    assert 0.4 * float(e["no_pickup_penalty"]) < float(e["success_bonus"])
