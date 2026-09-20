@@ -80,7 +80,9 @@ class OpenYAMFeedEnv(gym.Env):
         self.base_width = {n: float(self.scene.spec(n).width) for n in OBJECTS}
         self.rest_z = dict(self.base_rest_z)
         self.width = dict(self.base_width)
-        self.pad_geoms = set(self.tool._pad_l) | set(self.tool._pad_r)
+        self.left_pads = set(self.tool._pad_l)
+        self.right_pads = set(self.tool._pad_r)
+        self.pad_geoms = self.left_pads | self.right_pads
         self._wrench = np.zeros(6)
         root = self.model.body("arm").id
         self.arm_geoms = {i for i in range(self.model.ngeom)
@@ -103,6 +105,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.prev_action = np.zeros(7)
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
         self.prev_dist = 0.0
+        self.object_start = np.zeros(3)
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
 
@@ -117,13 +120,23 @@ class OpenYAMFeedEnv(gym.Env):
         return self.data.site_xpos[self.tool.site_id] + R @ self.tool.tcp_local
 
     def _contacts(self):
-        held, table_hits = False, 0
+        """(touching, pinched, table_hits).
+
+        `pinched` requires BOTH pads on the object, which is what distinguishes holding it from
+        batting it: a single pad in contact is a swipe, and an earlier version of this env
+        rewarded exactly that.
+        """
+        touching, table_hits = False, 0
+        left = right = False
         gid = self.obj_gid[self.name]
         for i in range(self.data.ncon):
             pair = {int(self.data.contact[i].geom1), int(self.data.contact[i].geom2)}
-            held |= gid in pair and bool(pair & self.arm_geoms)
+            if gid in pair:
+                touching |= bool(pair & self.arm_geoms)
+                left |= bool(pair & self.left_pads)
+                right |= bool(pair & self.right_pads)
             table_hits += int(self.table_gid in pair and bool(pair & self.arm_geoms))
-        return held, table_hits
+        return touching, (left and right), table_hits
 
     def _grip_force(self) -> float:
         """Largest normal force any gripper pad is putting into the held object, in newtons."""
@@ -195,6 +208,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
+        self.object_start = self.scene.object_pos(self.name).copy()
         self.prev_dist = float(np.linalg.norm(self.target - self._tcp()))
         return self._observation(), {"success": False, "object": self.name}
 
@@ -227,7 +241,8 @@ class OpenYAMFeedEnv(gym.Env):
             self.target = obj_pos
 
         distance = float(np.linalg.norm(self.target - tcp))
-        held, table_hits = self._contacts()
+        touching, pinched, table_hits = self._contacts()
+        held = touching
         self.collisions += table_hits
         grip_force = self._grip_force()
         crush_limit = float(self.ecfg["max_grip_force_n"])
@@ -236,7 +251,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.peak_grip_force = max(self.peak_grip_force, grip_force)
         closed = self.data.ctrl[self.grip_aid] < 0.45 * self.grip_range[1]
         lifted = float(obj_pos[2]) >= self.rest_z[self.name] + float(self.ecfg["lift_height_m"])
-        carrying = held and closed and lifted
+        carrying = pinched and closed and lifted
 
         # Virtual wall around the head: never reward getting closer than this.
         wall = float(self.ecfg["head_radius_m"])
@@ -247,7 +262,10 @@ class OpenYAMFeedEnv(gym.Env):
         if self.stage == "reach":
             success = distance <= float(self.ecfg["success_distance_m"])
         elif self.stage == "grasp":
-            success = held and closed
+            settled = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2])) <= float(
+                self.ecfg["grasp_max_displacement_m"])
+            self.hold_steps = self.hold_steps + 1 if (pinched and closed and settled) else 0
+            success = self.hold_steps >= round(float(self.ecfg["grasp_hold_s"]) / self.dt)
         elif self.stage == "lift":
             self.hold_steps = self.hold_steps + 1 if carrying else 0
             success = self.hold_steps >= round(float(self.ecfg["lift_hold_s"]) / self.dt)
@@ -269,6 +287,9 @@ class OpenYAMFeedEnv(gym.Env):
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()
         reward -= float(self.ecfg["jerk_penalty"]) * np.square(raw - self.prev_action).mean()
         reward -= float(self.ecfg["collision_penalty"]) * table_hits
+        displaced = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2]))
+        if not carrying and displaced > float(self.ecfg["grasp_max_displacement_m"]):
+            reward -= float(self.ecfg["knock_penalty"]) * min(1.0, displaced)
         reward -= float(self.ecfg["wall_penalty"]) * breached
         # Firm but not crushing: penalise force past the limit, and reward the band below it
         # only while actually holding, so the policy cannot earn it by hovering with open jaws.
@@ -289,7 +310,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "collision_count": self.collisions, "wall_hits": self.wall_hits,
                 "grip_force_n": grip_force, "peak_grip_force_n": self.peak_grip_force,
                 "crush_steps": self.crush_steps, "object_width_m": self.width[self.name],
-                "object_height": float(obj_pos[2]), "carrying": bool(carrying)}
+                "object_height": float(obj_pos[2]), "carrying": bool(carrying), "pinched": bool(pinched),
+                "object_displaced_m": displaced}
         return self._observation(), float(reward), bool(success), bool(truncated), info
 
     def render(self):
