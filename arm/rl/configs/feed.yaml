@@ -74,6 +74,7 @@ env:
   orient_penalty: 0.10
   centre_across_m: 0.010       # object centre within this of the claws' mid-width
   centre_scale_m: 0.020        # centring cost saturates at this lateral error
+  hold_seat_frac: 0.3          # once pinched seated, the object may settle this far toward the tips
   min_seat_frac: 0.6           # a grasp counts only with the object this deep between the claws
   seat_penalty: 0.10           # pulls the gripper base toward the object before closing
   grasp_hold_s: 0.7            # a grab is a pick-up HELD still at height, or it is a fail
@@ -95,8 +96,9 @@ env:
   grip_band_bonus: 0.05
 
   grasp_bonus: 0.05
-  lift_progress_gain: 30.0     # x lift_height_m = 3.0 in total, paid once, as progress. At 1.0
-                               # going up was not worth discovering.
+  lift_progress_gain: 60.0     # x lift_height_m = 6.0 in total, paid once, as progress. +0.24/step at
+                               # 4 mm/step, so a correct lift is clearly positive after time and
+                               # drift costs (at 30 it netted ~0, at 10 nobody went up at all).
   pinch_once_bonus: 2.0        # grab stage: the seated pinch is a milestone, not an income
   drift_penalty: 2.0           # per metre sideways per step while lifting: a cost
   overshoot_penalty: 2.0       # per metre above the band

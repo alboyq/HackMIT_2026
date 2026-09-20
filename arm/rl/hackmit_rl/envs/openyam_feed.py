@@ -609,7 +609,11 @@ class OpenYAMFeedEnv(gym.Env):
             # up, and held still. A squeeze that never leaves the table is not a grasp, and the
             # next stage needs a stationary start.
             settled = stage_drift <= float(self.ecfg["pick_max_drift_m"])
-            seated = seat_frac >= float(self.ecfg["min_seat_frac"])
+            # Seating is judged when the pinch is MADE (pinch_paid). Lifted, the object settles
+            # toward the fingertips (measured 0.9 -> 0.5 under a correct scripted lift), and
+            # demanding 0.6 throughout switched the lift pay off and a penalty on mid-lift: a
+            # correct lift earned -0.24..+0.03 per step. Afterwards only a floor applies.
+            seated = self.pinch_paid and seat_frac >= float(self.ecfg["hold_seat_frac"])
             at_height = carrying and height <= lift_h + float(self.ecfg["lift_band_m"])
             steady = (joint_speed_now <= float(self.ecfg["reach_settle_qvel"])
                       and tcp_speed <= float(self.ecfg["reach_settle_speed_mps"]))
@@ -686,7 +690,8 @@ class OpenYAMFeedEnv(gym.Env):
             reward += float(self.ecfg["close_bonus"]) * (1.0 - grip_fraction)
             reward += float(self.ecfg["in_position_bonus"])
         else:
-            if self.stage == "grasp" and seat_frac < float(self.ecfg["min_seat_frac"]):
+            if (self.stage == "grasp" and not self.pinch_paid
+                    and seat_frac < float(self.ecfg["min_seat_frac"])):
                 # Nipped by the tips. It cannot succeed like this, so it must not earn like
                 # this either: census found 243 steps parked in a shallow pinch on the apple.
                 reward -= float(self.ecfg["seat_penalty"]) * (1.0 - seat_frac)
@@ -708,7 +713,7 @@ class OpenYAMFeedEnv(gym.Env):
             # 0.9/step at 30 cm, 270 an episode against a success bonus of 50, so once pinched the
             # best income was to swing the object as high as the arm goes.
             capped = float(np.clip(height, 0.0, lift_h))
-            if self.stage != "grasp" or seat_frac >= float(self.ecfg["min_seat_frac"]):
+            if self.stage != "grasp" or self.pinch_paid:
                 reward += float(self.ecfg["lift_progress_gain"]) * (capped - self.prev_lift)
                 self.prev_lift = capped
             if self.stage in ("grasp", "lift"):
