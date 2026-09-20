@@ -316,7 +316,15 @@ class OpenYAMFeedEnv(gym.Env):
         # Where the FOOD should end up: just short of the lips.
         self.food_point = self.mouth - approach * float(self.ecfg["food_gap_m"])
 
-        self.reach_offset = np.array([0.0, 0.0, float(self.ecfg["reach_offset_z"])])
+        # Hover so the FINGERTIPS clear the object's TOP. Keyed off the centre, a tall mug had
+        # the tips arriving ~30 mm below its rim, from the side: 6/9 mug grasps failed shoved.
+        if self.tip_ahead is None:
+            Rt = self.data.site_xmat[self.tool.site_id].reshape(3, 3)
+            axis, tcp = Rt @ self.tool.tool_local, self._tcp()
+            self.tip_ahead = 0.008 + max(float((self.data.geom_xpos[g] - tcp) @ axis)
+                                         for g in self.pad_geoms)
+        self.reach_offset = np.array([0.0, 0.0, self.rest_z[self.name] + self.tip_ahead
+                                      + float(self.ecfg["reach_clearance_m"])])
         self.filtered.fill(0)
         self.prev_action.fill(0)
         self.collisions = self.wall_hits = self.crush_steps = 0
@@ -571,7 +579,12 @@ class OpenYAMFeedEnv(gym.Env):
             reward += float(self.ecfg["close_bonus"]) * (1.0 - grip_fraction)
             reward += float(self.ecfg["in_position_bonus"])
         else:
-            reward += float(self.ecfg["pinch_bonus"])
+            if self.stage == "grasp" and seat_frac < float(self.ecfg["min_seat_frac"]):
+                # Nipped by the tips. It cannot succeed like this, so it must not earn like
+                # this either: census found 243 steps parked in a shallow pinch on the apple.
+                reward -= float(self.ecfg["seat_penalty"]) * (1.0 - seat_frac)
+            else:
+                reward += float(self.ecfg["pinch_bonus"])
             # Height pays as PROGRESS, capped at the lift height, so it telescopes to a fixed
             # total and cannot be farmed. The old `lift_bonus * height` was rent with no ceiling:
             # 0.9/step at 30 cm, 270 an episode against a success bonus of 50, so once pinched the

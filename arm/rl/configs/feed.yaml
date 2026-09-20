@@ -62,9 +62,8 @@ env:
   knock_free_m: 0.10           # contact under this is approach, not batting
   object_lost_m: 0.45          # past this it is gone: end the episode, do not chase
   object_lost_z: -0.05
-  reach_offset_z: 0.055        # reach aims ABOVE the object. Was 0.035; the grasp point moved
-                               # 20 mm toward the gripper base, so the tips hang that much lower,
-                               # and at 0.035 reach knocked objects up to 59 mm on arrival.
+  reach_clearance_m: 0.015     # reach hovers with the fingertips this far above the object's
+                               # TOP (half-height + fingertip length + this, above the centre)
   # Pose: straight down the camera axis, jaws squared to the object, object seated deep.
   max_tilt_deg: 15.0           # reach must ARRIVE this close to vertical
   max_off_square_deg: 15.0     # and this square to a box (round objects are exempt)
