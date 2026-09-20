@@ -65,7 +65,10 @@ YAMDIR = _find_menagerie()
 ARM_XML = YAMDIR / "yam.xml"
 
 CAM_RES = int(os.environ.get("YAM_CAM_RES", "256"))
-WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "75"))
+# The team is fitting a 100-degree, low-distortion lens (not the fisheye). NOTE: MuJoCo's fovy is the
+# VERTICAL angle and the visibility test treats the view as square. If the lens's 100 deg is its
+# diagonal on a 4:3 sensor, the true vertical is ~70 deg -- check the spec sheet and set this.
+WRIST_FOVY = float(os.environ.get("YAM_WRIST_FOVY", "100"))
 SCENE_FOVY = float(os.environ.get("YAM_SCENE_FOVY", "58"))
 GRIP_KP = float(os.environ.get("YAM_GRIP_KP", "800"))    # see _patched_arm
 # How far the fingertips sit off the wrist roll axis. The stock i2rt model hangs its fingers
