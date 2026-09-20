@@ -1,0 +1,19 @@
+{
+  "what": "clear gap between the two gripping faces, calipers, 2026-09-20 (mm). 'tip' = the jaw tips, 'base' = the inner end of the gripping face",
+  "closed": {
+    "tip": 0.0,
+    "mid": 21.0,
+    "base": 28.4
+  },
+  "open": {
+    "tip": 97.8,
+    "mid": 112.2,
+    "base": 123.39
+  },
+  "note": "the three spots along the face were not precisely located; tip and base are the extremes. Shape: a V (each face leans back ~14 mm tip-to-base), travel ~96 mm, parallel.",
+  "motor_0x08_rad": {
+    "closed": -0.06,
+    "open": -2.8775
+  },
+  "sim": "arm/ik/scene.py JAW_V_MM=28.4"
+}

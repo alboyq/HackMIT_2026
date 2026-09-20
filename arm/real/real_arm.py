@@ -49,7 +49,18 @@ REST_TOL = 0.06               # rad: 'back at the enable pose' for the purpose o
 GRIP_RAW = (-2.8775, -0.0600)  # (raw_open, raw_closed) for motor 0x08, read 2026-09-20 with the motor disabled
 GRIP_MARGIN = 0.08            # rad kept clear of both mechanical ends so the motor never stalls on them
 GRIP_STEP = 0.15              # rad per tick
-GRIP_LEAD = 0.10              # rad the setpoint may run ahead of the measured jaws: squeeze <= kp x lead (20 x 0.10 = 2 N.m)
+# rad the jaw setpoint may run ahead of the MEASURED jaws once they are blocked: squeeze torque <= kp x lead.
+# The jaws travel ~34 mm per rad, so 0.1 N.m at the motor is ~3 N at the pads (before the mechanism's own friction).
+# UNTESTED ON FOOD: try a sacrificial grape first and tune these.
+GRIP_LEADS = {"soft": 0.015,  # 0.3 N.m ~ 9 N : strawberry, grape, anything that bruises
+              "firm": 0.05}   # 1.0 N.m ~ 30 N: can, tape measure, apple
+FIRM_FOODS = {"can", "tape measure", "tape", "apple", "mug", "cup", "bottle", "block", "carrot"}
+SOFT_FOODS = {"strawberry", "grape", "raspberry", "blueberry", "tomato", "banana", "egg", "marshmallow"}
+GRIP_LEAD = GRIP_LEADS["soft"]   # default to gentle: dropping is bad, crushing is unrecoverable
+GRIP_FREE_LEAD = 0.03         # while the jaws are still MOVING they may be led by this much (0.6 N.m: enough to beat the mechanism's
+                              # friction). Once they stall on something for GRIP_STALL_TICKS the lead drops to the food's limit.
+GRIP_STALL_RAD, GRIP_STALL_TICKS = 0.003, 2
+SUBSTEPS = 6                  # motor commands per 30 Hz policy tick (~200 Hz, the rate arm_replay flies at): no 0.02 rad torque steps
 GRIP_OPEN_M = 0.0375          # the policies' gripper unit: metres per finger, 0 closed .. 0.0375 open
 # CONTACT / TORQUE STOP. Excess = |torque the motor reports - the feed-forward it was given|: what it is
 # spending beyond holding itself up. Limits sit above the gravity model's own error (the elbow needs ~11 N.m
@@ -68,16 +79,20 @@ def load_joint_map(path=REPO / "joint_map_measured.json"):
 
 
 class RealArm(ArmInterface):
-    def __init__(self, motors, kp, kd, gravity, laps, factors=(1.0, 1.1, 1.4, 1.0, 1.0, 1.0), lock=None, settle_s=1.0,
-                 grip_motor=None, grip_gains=(20.0, 0.5)):
-        from replay_pose2 import MotorError, Sender
+    def __init__(self, motors, kp, kd, gravity, laps, factors=None, lock=None, settle_s=1.0,
+                 grip_motor=None, grip_gains=(20.0, 0.5), coulomb=None, sleep=time.sleep):
+        from replay_pose2 import FIT, MotorError, Sender, load_fit
+        if factors is None:                      # the fit made from this arm's own torque logs (arm_replay/gravity_fit.json)
+            factors, fit_c, _ = load_fit(FIT)
+            coulomb = fit_c if coulomb is None else coulomb
+        self._sleep, self.grip_lead = sleep, GRIP_LEAD
         self.MotorError = MotorError
         self.sign, self.offset, stops = load_joint_map()
         assert np.all(self.sign == 1), "the measured map has sign +1 on every joint; anything else is a new measurement"
         self.laps = np.asarray(laps, float)
         lo, hi = stops[:, 0] - TAU * self.laps, stops[:, 1] - TAU * self.laps          # raw window this power session
         self.raw_lo, self.raw_hi = lo + STOP_MARGIN, hi - STOP_MARGIN
-        self.sender = Sender(motors, kp, kd, gravity, factors, lock=lock)
+        self.sender = Sender(motors, kp, kd, gravity, factors, lock=lock, **({} if coulomb is None else {"coulomb": coulomb}))
         self.motors, self.settle_s = motors, settle_s
         self.mode, self.fault = "idle", ""
         self._sp = None               # last COMMANDED raw setpoint. The only thing new targets are built from.
@@ -87,6 +102,7 @@ class RealArm(ArmInterface):
         self._trail, self._over, self.peak_excess = [], 0, np.zeros(6)
         self.grip_motor, self.grip_gains = grip_motor, grip_gains
         self._grip_sp = self._grip_pos = None    # last commanded / last reported raw gripper position
+        self._grip_stall = 0
 
     # ------------------------------------------------------------------ coordinates
     def to_model(self, raw):
@@ -132,10 +148,14 @@ class RealArm(ArmInterface):
             self._grip_tick(grip_target)
         want = np.clip(self.to_raw(q_target), self.raw_lo, self.raw_hi)
         step = np.clip(want - self._sp, -self.max_step_rad, self.max_step_rad)        # from the COMMANDED setpoint
-        sp = self._sp + step
         try:
-            self.sender(sp, step * self.rate_hz, self._gscale(), "run")
-            self._sp = sp
+            for k in range(SUBSTEPS):            # same 0.02 rad, delivered as 6 small setpoints 5 ms apart
+                tick = time.time()
+                sp = self._sp + step / SUBSTEPS
+                self.sender(sp, step * self.rate_hz, self._gscale(), "run")
+                self._sp = sp
+                if k < SUBSTEPS - 1:
+                    self._sleep(max(0.0, 1.0 / (self.rate_hz * SUBSTEPS) - (time.time() - tick)))
             self._trail = (self._trail + [sp.copy()])[-BACKOFF_TICKS:]
             excess = np.abs(self.sender.last["torque"] - self.sender.last["tff"])
             self.peak_excess = np.maximum(self.peak_excess, excess)
@@ -157,10 +177,20 @@ class RealArm(ArmInterface):
             lo, hi = sorted((opn, cls_))
             want = float(np.clip(cls_ + f * (opn - cls_), lo + GRIP_MARGIN, hi - GRIP_MARGIN))
             sp = self._grip_sp + float(np.clip(want - self._grip_sp, -GRIP_STEP, GRIP_STEP))
-            self._grip_sp = float(np.clip(sp, self._grip_pos - GRIP_LEAD, self._grip_pos + GRIP_LEAD))
+            lead = self.grip_lead if self._grip_stall >= GRIP_STALL_TICKS else max(GRIP_FREE_LEAD, self.grip_lead)
+            self._grip_sp = float(np.clip(sp, self._grip_pos - lead, self._grip_pos + lead))
+        before = self._grip_pos
         st = self.grip_motor.command(pos=self._grip_sp, vel=0.0, kp=self.grip_gains[0], kd=self.grip_gains[1], torque=0.0)
         if st is not None:
             self._grip_pos = float(st.position)
+            pushing = grip_m is not None and abs(self._grip_sp - self._grip_pos) > 0.5 * self.grip_lead
+            self._grip_stall = self._grip_stall + 1 if pushing and abs(self._grip_pos - before) < GRIP_STALL_RAD else (self._grip_stall if grip_m is None else 0)
+
+    def set_food(self, name):
+        """Pick the squeeze limit from what is being picked up. Unknown food is treated as soft."""
+        kind = "firm" if name and name.strip().lower() not in SOFT_FOODS and name.strip().lower() in FIRM_FOODS else "soft"
+        self.grip_lead = GRIP_LEADS[kind]
+        return kind
 
     def grip_opening_m(self):
         if self._grip_pos is None:
@@ -238,7 +268,7 @@ class RealArm(ArmInterface):
         return laps
 
     @classmethod
-    def connect(cls, laps=None, token=None, factors=(1.0, 1.1, 1.4, 1.0, 1.0, 1.0), gripper=True):
+    def connect(cls, laps=None, token=None, factors=None, gripper=True):
         """Same sequence as arm_replay/replay_pose2.main(), which has run on this arm: the watchdog register must
         read 0 (it is only READ here, never written), no latched faults, session check against the measured stops,
         then per motor: read -> enable -> hold where it is. Nothing moves until send() is given a different target."""
@@ -276,6 +306,8 @@ class RealArm(ArmInterface):
                 q = m.read_state().position; m.enable()
                 m.command(pos=q, vel=0.0, kp=kp, kd=kd, torque=0.0); seed.append(q)
             drv._active = True
+            import atexit
+            atexit.unregister(drv._emergency_disable)   # the driver's exit hook makes every motor limp: it must never drop an arm that is off its stops
             arm._driver, arm._bus = drv, bus                      # keep both alive: the driver's atexit DISABLES motors
             arm.begin(seed[:6], grip_raw=seed[6] if gm is not None else None)
             return arm
@@ -345,7 +377,7 @@ def selftest() -> int:
 
     def fresh():
         ms = [Motor(i, float(seed[i])) for i in range(6)]
-        arm = RealArm(ms, kp, kd, grav, laps, settle_s=0.0)
+        arm = RealArm(ms, kp, kd, grav, laps, settle_s=0.0, sleep=lambda t: None)
         arm.begin(seed)
         return arm, ms
 
@@ -358,7 +390,7 @@ def selftest() -> int:
         arm.send(q0 + np.array([0, 0.5, 0, 0, 0, 0]))
     moved = arm._sp[1] - seed[1]
     check("a 0.5 rad jump is rate-limited to 0.02 rad per tick", abs(moved - 0.2) < 1e-9, f"moved {moved:.3f} rad in 10 ticks")
-    check("gravity feed-forward rides in every command once ramped in", all(abs(c[4] - 1.4 * 6.5) < 1e-6 for c in ms[2].sent[-8:]),
+    check("gravity feed-forward rides in every command once ramped in", all(abs(c[4] - arm.sender.factors[2] * 6.5) < 1e-6 for c in ms[2].sent[-8:]),
           f"J3 tff {ms[2].sent[-1][4]:.2f} N.m (first tick {ms[2].sent[0][4]:.2f}: it ramps in, as on the arm)")
     check("no live motor is ever read after begin()", sum(m.reads for m in ms) == 0)
     check("joints resting on their stops are NOT moved by the first command", abs(arm._sp[2] - seed[2]) < 1e-12 and abs(arm._sp[0] - seed[0]) < 1e-12,
@@ -386,7 +418,7 @@ def selftest() -> int:
     check("HOLD keeps sending the last COMMANDED setpoint (not the sagged measured one)",
           len(held) == 10 and np.allclose(held, arm._sp[2]) and abs(arm._sp[2] - ms[2].pos) > 0.02,
           f"commanded {arm._sp[2]:.3f} vs measured {ms[2].pos:.3f}")
-    check("HOLD still carries feed-forward torque", abs(ms[2].sent[-1][4] - 1.4 * 6.5) < 1e-6)
+    check("HOLD still carries feed-forward torque", abs(ms[2].sent[-1][4] - arm.sender.factors[2] * 6.5) < 1e-6)
     check("the setpoint moved at most one more step after the trip", np.all(np.abs(arm._sp - sp_before) <= 0.4 + 1e-9))
     msg = arm.shutdown()
     check("shutdown away from rest does NOT release the arm", sum(m.disabled for m in ms) == 0 and arm.mode == "hold", msg[:60])
@@ -416,15 +448,17 @@ def selftest() -> int:
     arm.send(q0, grip_target=0.01)
     check("a gripper target is refused (holds) when the session has no gripper motor", arm.mode == "hold", arm.fault[:50])
     ms = [Motor(i, float(seed[i])) for i in range(6)]; gm = Motor(7, -2.80)
-    arm = RealArm(ms, kp, kd, grav, laps, settle_s=0.0, grip_motor=gm); arm.begin(seed, grip_raw=-2.80)
-    for _ in range(60):
+    arm = RealArm(ms, kp, kd, grav, laps, settle_s=0.0, sleep=lambda t: None, grip_motor=gm); arm.begin(seed, grip_raw=-2.80)
+    for _ in range(220):
         arm.send(arm.to_model(seed), grip_target=0.0)
     check("the jaws close to the margin, never onto the mechanical end", abs(gm.pos - (GRIP_RAW[1] - GRIP_MARGIN)) < 0.02, f"{gm.pos:+.3f}")
     check("gripper opening is reported from the replies", arm.read().grip < 0.002, f"{arm.read().grip:.4f} m")
     gm.stuck = True; gm.pos = -1.5; arm._grip_pos = arm._grip_sp = -1.5
     for _ in range(30):
         arm.send(arm.to_model(seed), grip_target=0.0)
-    check("jaws blocked by an object: the setpoint leads by <= GRIP_LEAD (bounded squeeze)", abs(arm._grip_sp - gm.pos) <= GRIP_LEAD + 1e-9, f"lead {abs(arm._grip_sp - gm.pos):.3f} rad")
+    check("jaws blocked by an object: the setpoint leads by <= GRIP_LEAD (bounded squeeze)", abs(arm._grip_sp - gm.pos) <= arm.grip_lead + 1e-9, f"lead {abs(arm._grip_sp - gm.pos):.3f} rad")
+    check("soft food gets the gentle squeeze, a can the firm one, unknown food the gentle one",
+          (arm.set_food("grape"), arm.set_food("can"), arm.set_food("mystery")) == ("soft", "firm", "soft"))
     n = len(gm.sent); arm.hold(); arm.send(None)
     check("a hold keeps commanding the jaws (the food is not dropped)", len(gm.sent) > n and arm.mode == "hold")
 
