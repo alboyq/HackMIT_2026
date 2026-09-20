@@ -94,6 +94,16 @@ class OpenYAMFeedEnv(gym.Env):
         self.obj_gid = {n: self.model.geom(n).id for n in OBJECTS}
         self.obj_qadr = {n: self.scene.object_qadr(n) for n in OBJECTS}
         self.table_gid = self.model.geom("table").id
+        # Every geom of the seated person. NOTHING the robot controls may ever touch these.
+        user_bodies = {self.model.body(n).id for n in ("user_head", "user_torso", "user_hand")}
+        self.user_geoms = {i for i in range(self.model.ngeom)
+                           if int(self.model.geom_bodyid[i]) in user_bodies}
+        self.object_geoms = set(self.obj_gid.values())
+        # Elbow and forearm: the parts that swing past the person's head on the way to an object.
+        # The hand itself is handled by the pad wall, because feeding must bring it near the mouth.
+        self.swing_bodies = [self.model.body(n).id for n in ("link_2", "link_3", "link_4", "link_5")]
+        self.head_bid = self.model.body("user_head").id
+        self.patient_hits = 0
 
         # Nominal geometry, kept so every episode can re-scale from the same baseline.
         self.base_size = {n: self.model.geom_size[self.obj_gid[n]].copy() for n in OBJECTS}
@@ -290,6 +300,12 @@ class OpenYAMFeedEnv(gym.Env):
         usable = max(1e-3, float(self.tool.max_width) - clearance)
         for obj in OBJECTS:
             scale = float(self.np_random.uniform(lo_s, min(hi_s, usable / self.base_width[obj])))
+            # Small food: a strawberry-sized sphere, a bite-sized cube. Variants of the existing
+            # classes, so the one-hot and every trained checkpoint stay valid; the policy already
+            # observes the width. Mass follows scale**3 below, so small really is light.
+            if (obj == self.name and obj in ("apple", "block")
+                    and self.np_random.random() < float(self.ecfg.get("small_object_prob", 0.0))):
+                scale = float(self.np_random.uniform(*self.ecfg["small_scale_range"]))
             self.model.geom_size[self.obj_gid[obj]] = self.base_size[obj] * scale
             self.model.body_mass[self.obj_bid[obj]] = self.base_mass[obj] * scale ** 3
             self.rest_z[obj] = self.base_rest_z[obj] * scale
@@ -310,6 +326,15 @@ class OpenYAMFeedEnv(gym.Env):
             angle = self.np_random.uniform(lo_s + pad, hi_s - pad)
             radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
             point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
+            # The person's hand rests on the table inside the workspace. An object next to it cannot
+            # be grasped without brushing it (3/60 contacts, all there), so nothing spawns near it.
+            hand_xy = self.data.xpos[self.model.body("user_hand").id][:2]
+            for _ in range(20):
+                if float(np.linalg.norm(point - hand_xy)) >= float(self.ecfg.get("hand_keepout_m", 0.0)):
+                    break
+                angle = self.np_random.uniform(lo_s + pad, hi_s - pad)
+                radius = self.np_random.uniform(*self.ecfg["object_radius_range_m"])
+                point = np.array([radius * np.cos(angle), radius * np.sin(angle)])
             # If a slot neighbour still lands too close, push this one out along its own ray.
             for _ in range(12):
                 tight = [other for name, other in placed
@@ -357,6 +382,8 @@ class OpenYAMFeedEnv(gym.Env):
         self.filtered.fill(0)
         self.prev_action.fill(0)
         self.collisions = self.wall_hits = self.crush_steps = 0
+        self.patient_hits = 0
+        self.patient_part = ""
         self.self_collisions = self.curl_steps = 0
         self.knocked = self.was_pinched = False
         self.peak_velocity = 0.0
@@ -503,9 +530,16 @@ class OpenYAMFeedEnv(gym.Env):
 
         # The ONLY velocity enforcement: cap the commanded joint delta. Physics is never edited.
         cap = float(self.ecfg["max_joint_velocity_rad_s"])
-        max_delta = cap * self.dt
+        # A small object is light and easy to bat away or crush, so the arm handles it slower and
+        # the jaws are allowed less force. 1.0 at full size, down to small_min_factor. Reach is a
+        # frozen policy trained at full speed, so it is left alone.
+        size_factor = 1.0
+        if self.stage != "reach":
+            size_factor = float(np.clip(self.width[self.name] / float(self.ecfg.get("full_size_width_m", 0.05)),
+                                        float(self.ecfg.get("small_min_factor", 1.0)), 1.0))
+        max_delta = cap * self.dt * size_factor
         desired = self.data.ctrl[:6] + np.clip(
-            float(self.ecfg["action_delta_rad"]) * self.filtered[:6], -max_delta, max_delta)
+            float(self.ecfg["action_delta_rad"]) * size_factor * self.filtered[:6], -max_delta, max_delta)
         self.data.ctrl[:6] = np.clip(desired, self.ctrl_lo, self.ctrl_hi)
         self.data.ctrl[self.grip_aid] = (self.grip_range[0]
                                          + 0.5 * (self.filtered[6] + 1) * np.ptp(self.grip_range))
@@ -538,11 +572,25 @@ class OpenYAMFeedEnv(gym.Env):
         lead_margin = (self._pad_distance_to(self.mouth)
                        - max(0.0, float(np.linalg.norm(self.mouth - obj_pos)) - obj_radius))
         touching, pinched, table_hits, self_hits = self._contacts()
+        # The arm, the claws, or anything it is carrying, against the person. In every stage.
+        patient_hit = False
+        for ci in range(self.data.ncon):
+            pair = {int(self.data.contact[ci].geom1), int(self.data.contact[ci].geom2)}
+            if pair & self.user_geoms and pair & (self.arm_geoms | self.object_geoms):
+                patient_hit = True
+                ug = next(iter(pair & self.user_geoms))
+                self.patient_part = self.model.body(int(self.model.geom_bodyid[ug])).name
+                break
+        self.patient_hits += int(patient_hit)
+        # Distance from the elbow/forearm to the head's surface. Cheap on purpose (four norms): a
+        # full geometric query per step would cost more than the physics.
+        head_c = self.data.xpos[self.head_bid]
+        head_clear = float(min(np.linalg.norm(self.data.xpos[b] - head_c) for b in self.swing_bodies)) - 0.095
         held = touching
         self.collisions += table_hits
         self.self_collisions += self_hits
         grip_force = self._grip_force()
-        crush_limit = float(self.ecfg["max_grip_force_n"])
+        crush_limit = float(self.ecfg["max_grip_force_n"]) * size_factor
         crushing = grip_force > crush_limit
         self.crush_steps += int(crushing)
         self.peak_grip_force = max(self.peak_grip_force, grip_force)
@@ -779,6 +827,7 @@ class OpenYAMFeedEnv(gym.Env):
             reward += float(self.ecfg["grip_band_bonus"])
         if measured_velocity > cap * 1.5:
             reward -= float(self.ecfg["velocity_breach_penalty"])
+        success = bool(success) and not patient_hit
         if success:
             reward += float(self.ecfg["success_bonus"])
 
@@ -790,7 +839,16 @@ class OpenYAMFeedEnv(gym.Env):
             reward -= float(self.ecfg["lost_penalty"])
         # An episode that can no longer succeed ends NOW. Left running, its only income is
         # SECURE rent, and collecting that is what taught the policy to wave the object about.
-        failed = lost
+        failed = lost or patient_hit
+        # Keep the elbow away from the face BEFORE it gets there: a cost that ramps up inside the
+        # keep-out, in every stage. Measured need: links 3-4 passed ~10 cm from the head routinely.
+        keep = float(self.ecfg.get("head_keepout_m", 0.0))
+        if keep > 0.0 and head_clear < keep:
+            reward -= float(self.ecfg["head_near_penalty"]) * (1.0 - max(0.0, head_clear) / keep)
+        if patient_hit:
+            # The super penalty. Bigger than anything else in the reward, including success:
+            # no outcome is worth touching the person, and the episode ends on the spot.
+            reward -= float(self.ecfg["patient_contact_penalty"])
         if self.stage == "grasp":
             # Before the pinch a 4 cm move is a shove. Once held, some sideways travel on the way
             # up is a lift, not a shove: a scripted vertical pull itself drifted 10-40 mm.
@@ -799,7 +857,7 @@ class OpenYAMFeedEnv(gym.Env):
             failed |= self.was_lifted and not pinched          # picked it up and DROPPED it
         elif self.stage == "lift":
             failed |= stage_drift > float(self.ecfg["lift_abort_drift_m"])
-        failed = failed and not success
+        failed = failed and (patient_hit or not success)
         if failed:
             # Charge the time it skipped. Without this, flinging the object off the table cost
             # 4 while parking cost 15, and the policy learned to end episodes by throwing.
@@ -830,6 +888,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "lift_m": height, "stage_drift_m": stage_drift, "tilt_deg": tilt_deg,
                 "off_square_deg": float(off_square_deg), "seat_frac": seat_frac, "e_jaw_m": e_jaw, "e_pad_m": e_pad,
                 "centred": bool(centred), "oriented": bool(oriented),
+                "patient_hit": bool(patient_hit), "patient_hits": self.patient_hits,
+                "patient_part": getattr(self, "patient_part", ""), "head_clearance_m": head_clear, "size_factor": size_factor,
                 "object_in_view": bool(self.seen.get("object_jitter_m", False)),
                 "mouth_in_view": bool(self.seen.get("mouth_jitter_m", False))}
         return self._observation(), float(reward), bool(success or failed), bool(truncated), info

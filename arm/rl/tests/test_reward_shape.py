@@ -118,3 +118,11 @@ def test_not_picking_up_is_the_worst_outcome(path):
                       float(e["time_penalty"]) * int(e["episode_steps"]))
     assert float(e["no_pickup_penalty"]) > worst_other
     assert 0.4 * float(e["no_pickup_penalty"]) < float(e["success_bonus"])
+
+
+@pytest.mark.parametrize("path", CONFIGS, ids=lambda p: p.name)
+def test_touching_the_patient_is_never_worth_it(path):
+    e = load_config(path)["env"]
+    hit = float(e["patient_contact_penalty"])
+    assert hit >= 3 * float(e["success_bonus"]), "a hit must outweigh any success it could buy"
+    assert hit > float(e["no_pickup_penalty"]) + float(e["time_penalty"]) * int(e["episode_steps"])

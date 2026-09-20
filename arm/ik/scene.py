@@ -291,7 +291,7 @@ def build_scene_xml(objects=None, user=(USER_X, USER_Y, USER_Z)) -> str:
     <body name="user_head" pos="{ux:.4f} {uy:.4f} {uz:.4f}">
       <geom name="head" type="sphere" size="{HEAD_R:.4f}" material="skin"/>
       <geom name="nose" type="capsule" fromto="{-HEAD_R * 0.92:.4f} 0 -0.005 {-HEAD_R * 1.12:.4f} 0 -0.020"
-            size="0.012" material="skin" contype="0" conaffinity="0"/>
+            size="0.012" material="skin"/>
       <site name="mouth" pos="{-HEAD_R * 0.92:.4f} 0 -0.038" size="0.010" rgba="0.8 0.15 0.15 1" group="4"/>
       <site name="face" pos="{-HEAD_R:.4f} 0 0" size="0.008" rgba="0.8 0.5 0.15 1" group="4"/>
     </body>

@@ -45,6 +45,11 @@ env:
   # Scene randomisation: top-down band from MEASUREMENTS.md, plus per-episode re-sizing
   object_radius_range_m: [0.25, 0.45]
   object_scale_range: [0.75, 1.30]
+  small_object_prob: 0.35      # apple -> strawberry-sized, block -> bite-sized cube, this often
+  small_scale_range: [0.45, 0.60]   # x the nominal size; mass follows scale**3
+  full_size_width_m: 0.05      # at or above this width the arm runs at full speed and full grip force
+  small_min_factor: 0.5        # smallest objects: half speed, half the crush limit
+  hand_keepout_m: 0.15         # nothing spawns this close to the person's resting hand
   object_spacing_m: 0.12       # real setup will not crowd them; do not train on packed scenes
   settle_steps: 40             # let them come to rest before the episode starts
   pad_clearance_m: 0.026       # 13 mm a side fully open; 9 mm was under the centring error
@@ -99,6 +104,10 @@ env:
   lift_progress_gain: 60.0     # x lift_height_m = 6.0 in total, paid once, as progress. +0.24/step at
                                # 4 mm/step, so a correct lift is clearly positive after time and
                                # drift costs (at 30 it netted ~0, at 10 nobody went up at all).
+  patient_contact_penalty: 200.0   # SUPER penalty: arm, claws or carried object touching the person.
+                               # Ends the episode. Larger than success; nothing is worth it.
+  head_keepout_m: 0.15         # elbow/forearm closer than this to the head's surface starts to cost
+  head_near_penalty: 0.5       # per step at the surface, ramping from 0 at the keep-out edge
   no_pickup_penalty: 40.0      # THE biggest penalty: a grab episode that ends without a pick-up.
                                # Full for a hover; down to 40% for a seated pinch lifted to height.
   pinch_once_bonus: 2.0        # grab stage: the seated pinch is a milestone, not an income

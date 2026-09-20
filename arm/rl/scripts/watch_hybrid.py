@@ -14,7 +14,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hybrid_pick import lift_action, load  # noqa: E402
+from hybrid_pick import lift_action, load, shield  # noqa: E402
 
 from hackmit_rl.config import load_config
 from hackmit_rl.envs import OpenYAMFeedEnv
@@ -66,6 +66,7 @@ def main():
                 a, _ = model.predict(obs, deterministic=True)
             else:
                 a = lift_action(e, anchor, jacp, jacr, info.get("lift_m", 0.0))
+            a, gap, froze = shield(e, a)
             e.prior_hook = None      # the auto-reset inside step() must not draw the NEXT episode's reach
             obs, _, done, infos = env.step(a)
             info = infos[0]
@@ -81,6 +82,8 @@ def main():
                 (f"{stage}   target: {info['object']}", (0, 255, 0) if anchor is not None else (255, 255, 255)),
                 (f"lift {1000*info['lift_m']:4.0f} mm   sideways {1000*info['stage_drift_m']:4.1f} mm (limit {1000*float(cfg["env"]["pick_max_drift_m"]):.0f})"
                  f"   seated {info['seat_frac']:.2f}", (0, 255, 255)),
+                (f"safety margin to person {1000*gap:4.0f} mm" + ("   SHIELD: ARM FROZEN" if froze else ""),
+                 (0, 0, 255) if froze else (0, 200, 120)),
                 (f"pick-ups, last {len(recent)}: {rate}   ep {episode}   [q] quit", (200, 200, 200)),
             ])
             if key in (ord("q"), 27):
