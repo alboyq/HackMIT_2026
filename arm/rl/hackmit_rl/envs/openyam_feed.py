@@ -581,7 +581,7 @@ class OpenYAMFeedEnv(gym.Env):
             # A grab is a PICK-UP: seated between the claws, lifted clear of the table, straight
             # up, and held still. A squeeze that never leaves the table is not a grasp, and the
             # next stage needs a stationary start.
-            settled = stage_drift <= float(self.ecfg["grasp_max_displacement_m"])
+            settled = stage_drift <= float(self.ecfg["pick_max_drift_m"])
             seated = seat_frac >= float(self.ecfg["min_seat_frac"])
             at_height = carrying and height <= lift_h + float(self.ecfg["lift_band_m"])
             steady = (joint_speed_now <= float(self.ecfg["reach_settle_qvel"])
@@ -629,6 +629,12 @@ class OpenYAMFeedEnv(gym.Env):
 
         progress = self.prev_dist - distance
         reward = 10.0 * progress - 0.1 * distance
+        if self.stage == "grasp" and phase == 2:
+            # Once pinched, TCP-to-object distance means nothing -- and for a grasp the table
+            # limits, the TCP sits ABOVE the object's centre, so this term paid for pushing DOWN.
+            # Measured: after the pinch the TCP went 10-30 mm down, the object squirted sideways
+            # to the fail line, while a scripted straight-up pull lifted the same pinch 95-135 mm.
+            reward = 0.0
         if self.stage in ("reach", "grasp") and phase < 2:
             # COSTS, fading in with proximity so the transit is free. Never a bonus: a pose that
             # pays per step is a pose worth loitering in.
@@ -749,7 +755,10 @@ class OpenYAMFeedEnv(gym.Env):
         # SECURE rent, and collecting that is what taught the policy to wave the object about.
         failed = lost
         if self.stage == "grasp":
-            failed |= stage_drift > float(self.ecfg["grasp_max_displacement_m"])
+            # Before the pinch a 4 cm move is a shove. Once held, some sideways travel on the way
+            # up is a lift, not a shove: a scripted vertical pull itself drifted 10-40 mm.
+            gate = "pick_abort_drift_m" if self.pinch_paid else "grasp_max_displacement_m"
+            failed |= stage_drift > float(self.ecfg[gate])
             failed |= self.was_lifted and not pinched          # picked it up and DROPPED it
         elif self.stage == "lift":
             failed |= stage_drift > float(self.ecfg["lift_abort_drift_m"])
