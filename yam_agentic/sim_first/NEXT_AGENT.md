@@ -1,10 +1,17 @@
 # Handoff — pick this up here
 
-Updated 2026-09-20. Read this, then `RESUME.md` for how to restart anything.
+Updated 2026-09-20, late. Read this, then `RESUME.md` for how to restart anything.
 
-**The gripper bug from the previous handoff is FIXED.** `YAM_ARM=linear_4310` is now the
-default and grasps; 12/12 tests pass on both it and the stock crank. Details in §1 so nobody
-re-opens it. The open work starts at §2.
+**The gripper bug from the previous handoff is FIXED** (§1) — `YAM_ARM=linear_4310` is the
+default and grasps, 12/12 tests on both grippers. Two more real bugs fell out of it and are also
+fixed: the wrist camera was pointing 124 deg away from the TCP, and the demo filter was rejecting
+30 % of good episodes.
+
+**Gate A is still open, and the cause is now measured** (§2). Three training runs have failed at
+~0 %. It is NOT the gripper, the observation pipeline, the eval yardstick, the batch size, the
+chunk length, temporal ensembling, or visual variance — each was ruled out by measurement, and §2
+lists how so nobody repeats them. The live hypothesis is simply **optimiser steps**: the model's
+fit improves ~x0.75 per doubling of steps with no plateau, and no run has had enough.
 
 ---
 
@@ -67,32 +74,68 @@ and the ones that used `linear_4310` also carry the broken wrist view. Regenerat
 
 ---
 
-## 2. Task: nothing has ever seen a real camera frame
+## 2. Gate A: why the policy scores ~0 %, and what is left to try
 
-Unchanged, and now the highest-risk unknown. Gate B in `../GAME_PLAN.md`: feed real iPhone +
-wrist frames and real 2D prompts to a trained policy with the arm posed and **stationary**, and
-check the first predicted action points at the real object the way it does in sim. Zero arm
-risk, and it measures the sim-to-real gap before anything moves.
+Three runs, all ~0 %: `yam_v3` (batch 24 / 12k, 887 demos), `yam_v5` (batch 8 / 20k, same data),
+`yam_v7` (batch 8, 1,865 demos, pose-B camera, table kept, no blur). `picked` never exceeded
+3/55.
 
-On whether a non-photorealistic renderer can transfer at all — the literature says yes, but
-conditionally, and it is worth knowing the conditions before spending GPU time:
+### Ruled out by measurement — do not redo these
 
-- [Tobin et al. 2017](https://arxiv.org/abs/1703.06907) trained detectors on deliberately
-  non-realistic random textures in a low-fidelity renderer and reached 1.5 cm real-world
-  accuracy, enough to grasp in clutter.
-- [Benchmarking Domain Randomisation](https://arxiv.org/pdf/2011.07112) isolates rendering
-  quality and finds photorealism matters **less than which factors you randomise**; mixing
-  low-quality with high-quality renders matches pure photorealism.
-- [RCAN](https://arxiv.org/pdf/1812.07252) (randomized→canonical) is the published fallback if
-  the gap does bite.
+| suspect | verdict | evidence |
+|---|---|---|
+| eval yardstick too strict | no | the **expert scores 23/23 = 100 %** under eval's own test (`tools/expert_ceiling.py`); median 2.9 cm against its 6 cm threshold |
+| observation pipeline mismatch | no | regenerating a seed gives a **bit-identical** frame to the stored one — pixels and the 17-dim state, max diff 0.0 |
+| model collapsed to the mean | no | open-loop MAE 2.9-5 deg against a 17-22 deg mean-action baseline; prediction spread matches the truth's |
+| not reading the 2D prompt | no | first action correlates with the object box about as well as the expert's: j1 **−0.81 vs −0.84**, j6 −0.61 vs −0.77 |
+| generalisation / backgrounds | no | fails identically on *training* seeds with *training* backgrounds |
+| chunk length / blind execution | no | `na=1` (re-infer every tick) fails the same as `na=10` |
+| ACT temporal ensembling missing | no | enabling it at the paper's 0.01 changed nothing (`YAM_TE=0.01` on the evaluator) |
+| batch size vs the 86 % SO-101 recipe | no | matching batch 8 changed nothing |
+| too much visual variance | **no** | pose-B camera (look-down spread 24 deg -> 7 deg), table kept, blur off and 2x the demos moved the fit metric from 5.00 to 4.97 deg at the same step. This one surprised me; it was my main hypothesis. |
 
-The caveat: that evidence is strongest for coarse spatial localisation, not end-to-end fine
-manipulation from pixels. Our split already respects it — planner picks what/where, IK does
-transport, the learned policy owns only the last inch. And note that **geometry realism matters
-more than texture realism here**, which is exactly what §1 was: you can randomise texture away,
-you cannot randomise away the wrong finger shape in the foreground of every frame.
+### The failure mechanism, precisely
 
----
+From a **bit-identical** observation the policy is already ~10 deg off on the first action, and
+the error compounds monotonically until `j2` hits its limit and the object leaves the wrist view.
+The blank wrist frames in failure filmstrips are a *consequence* of that divergence, not a cause.
+
+The reason it compounds is accuracy: the policy's open-loop error is comparable to the signal it
+has to predict. A grasp needs roughly 1 cm at 0.4 m of reach, i.e. **about 1.5 deg**; the best
+checkpoint so far is 2.9 deg.
+
+### What is actually left
+
+Fit improves with optimiser steps and shows no plateau:
+
+| run / step | train-set MAE |
+|---|---|
+| v3 step_2000 | 6.2 deg |
+| v7 step_4000 | 4.97 deg |
+| v7 step_8000 | 3.71 deg |
+| v3 step_8000 (batch 24, 3x samples/step) | 2.9 deg |
+
+That is ~x0.75 per doubling, which projects to ~1.55 deg at **64k steps** — 3x more than any run
+has had. `yam_v7` is extended to 60k to test exactly that. A capacity-limited model would
+plateau; this does not, which is why steps and not data is the current bet.
+
+If it plateaus above ~2 deg, the remaining levers in order: cut to 1-2 objects (less to fit),
+co-train with real frames, then the modular fallback in `../GAME_PLAN.md` §08 — which already
+scores 100 % in sim and now has the depth calibrator it was missing.
+
+## 2b. Nothing has ever seen a real camera frame
+
+Still true, and still the highest-risk unknown after Gate A. Gate B: feed real iPhone + wrist
+frames and real 2D prompts to a trained policy with the arm **stationary**, and check the first
+predicted action points at the real object the way it does in sim. Zero arm risk.
+
+On whether a non-photorealistic renderer can transfer: [Tobin et al. 2017](https://arxiv.org/abs/1703.06907)
+reached 1.5 cm real accuracy from deliberately non-realistic textures;
+[Benchmarking DR](https://arxiv.org/pdf/2011.07112) finds photorealism matters less than *which*
+factors are randomised; [RCAN](https://arxiv.org/pdf/1812.07252) is the fallback. The caveat:
+that evidence is for coarse localisation, not fine manipulation — which is why the split puts
+planning and transport outside the policy. And **geometry realism matters more than texture
+realism**: the gripper bug proved you cannot randomise away a wrong finger shape.
 
 ## 3. What works right now
 
@@ -125,11 +168,17 @@ From `sim/`, `python demo_pick_present.py can` reports `strategy=top lifted 75 m
 
 ### State of the runs
 
-| run | what | verdict |
-|---|---|---|
-| GX10 `runs/yam_g1` | 2,104 demos / 197k frames, first eval 0/56 | **scrap** — wrong gripper, old wrist mount, over-heavy blur. Says nothing about the approach. |
-| `yam_v1` (Mac, not in repo) | 1,017 demos | superseded — wrong gripper |
-| `yam_v2` (Mac, not in repo) | partial | deleted |
+| run | data | training | result |
+|---|---|---|---|
+| `yam_v3` | 887 demos (63 % filter, wide cam, no table) | batch 24 / 12k | **0/55** at steps 2000-8000 |
+| `yam_v5` | same data | batch 8 / 20k | **1/56** |
+| `yam_v6` | **1,865 demos (93 % kept)**, pose-B cam, table, no blur, 197k frames / 42 GB | — | the current dataset |
+| `yam_v7` | 9 of v6's 12 shards (149,682 frames, 34 GB) | batch 8, extended to **60k** | running |
+| GX10 `yam_g1` | old | — | scrap: wrong gripper, backwards wrist cam |
+
+Only 9 of 12 shards are in `yam_v7`: all 12 is 44.8 GB of host RAM and the Mac has ~52 GB free,
+which is how an earlier run got starved (see the trap below). The full 197k frames want the
+GX10's 121 GB, not a laptop.
 
 ## 4. Order to work in
 
@@ -152,6 +201,14 @@ From `sim/`, `python demo_pick_present.py can` reports `strategy=top lifted 75 m
 - **Check both fingers when testing a gripper.** `mj_forward` does not solve the `<equality>`
   coupling, so setting only `joint7` in a test harness leaves the jaws asymmetric and every
   result meaningless. This produced one entirely bogus sweep before it was caught.
-- **`pkill -f <pattern>` over ssh matches the ssh session's own command line.** Kill by PID or
-  use `/tmp/relaunch_gx10.sh` on the GX10.
+- **`pgrep -f` / `pkill -f <script name>` matches the shell running the command.** This bit three
+  separate times in one night: a waiter loop that could never exit, a suspend that paused nothing,
+  and a kill that killed its own PIDs. Match the interpreter path with the bracket trick —
+  `ps -eo pid,command | grep "[.]venv/bin/python.*train_act_yam.py"` — never the script name alone.
+- **`multiprocessing` spawn workers do not match the parent's pattern at all**, so killing the
+  parent orphans them holding gigabytes. Kill children by PPID, then sweep `[s]pawn_main`.
+- **Do not run demo generation beside GPU training.** The trainer holds the whole image tensor in
+  host RAM and gathers a random batch every step; generation pushed it into swap (19.6 M swapouts,
+  RSS 2.7 GB of 20.8) and throughput fell 6.75 -> 4.73 it/s while the GPU idled. Overlap idle
+  resources, never the critical path's memory.
 - **Exact-string `.replace()` on MJCF is fragile.** Use a regex and assert the match count.
