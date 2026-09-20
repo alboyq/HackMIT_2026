@@ -80,6 +80,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.base_width = {n: float(self.scene.spec(n).width) for n in OBJECTS}
         self.rest_z = dict(self.base_rest_z)
         self.width = dict(self.base_width)
+        self.geom_body = {i: int(self.model.geom_bodyid[i]) for i in range(self.model.ngeom)}
         self.left_pads = set(self.tool._pad_l)
         self.right_pads = set(self.tool._pad_r)
         self.pad_geoms = self.left_pads | self.right_pads
@@ -104,6 +105,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.filtered = np.zeros(7)
         self.prev_action = np.zeros(7)
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
+        self.self_collisions = self.curl_steps = 0
         self.prev_dist = 0.0
         self.object_start = np.zeros(3)
         self.peak_velocity = 0.0
@@ -126,7 +128,7 @@ class OpenYAMFeedEnv(gym.Env):
         batting it: a single pad in contact is a swipe, and an earlier version of this env
         rewarded exactly that.
         """
-        touching, table_hits = False, 0
+        touching, table_hits, self_hits = False, 0, 0
         left = right = False
         gid = self.obj_gid[self.name]
         for i in range(self.data.ncon):
@@ -136,7 +138,14 @@ class OpenYAMFeedEnv(gym.Env):
                 left |= bool(pair & self.left_pads)
                 right |= bool(pair & self.right_pads)
             table_hits += int(self.table_gid in pair and bool(pair & self.arm_geoms))
-        return touching, (left and right), table_hits
+            g1, g2 = int(self.data.contact[i].geom1), int(self.data.contact[i].geom2)
+            if g1 in self.arm_geoms and g2 in self.arm_geoms:
+                b1, b2 = self.geom_body[g1], self.geom_body[g2]
+                adjacent = (b1 == b2
+                            or int(self.model.body_parentid[b1]) == b2
+                            or int(self.model.body_parentid[b2]) == b1)
+                self_hits += int(not adjacent)
+        return touching, (left and right), table_hits, self_hits
 
     def _grip_force(self) -> float:
         """Largest normal force any gripper pad is putting into the held object, in newtons."""
@@ -206,6 +215,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.filtered.fill(0)
         self.prev_action.fill(0)
         self.steps = self.hold_steps = self.collisions = self.wall_hits = self.crush_steps = 0
+        self.self_collisions = self.curl_steps = 0
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self.object_start = self.scene.object_pos(self.name).copy()
@@ -241,9 +251,10 @@ class OpenYAMFeedEnv(gym.Env):
             self.target = obj_pos
 
         distance = float(np.linalg.norm(self.target - tcp))
-        touching, pinched, table_hits = self._contacts()
+        touching, pinched, table_hits, self_hits = self._contacts()
         held = touching
         self.collisions += table_hits
+        self.self_collisions += self_hits
         grip_force = self._grip_force()
         crush_limit = float(self.ecfg["max_grip_force_n"])
         crushing = grip_force > crush_limit
@@ -286,6 +297,17 @@ class OpenYAMFeedEnv(gym.Env):
                 reward -= float(self.ecfg["drop_penalty"])      # dropping the food is the failure mode
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()
         reward -= float(self.ecfg["jerk_penalty"]) * np.square(raw - self.prev_action).mean()
+        # Curling up: links touching, the wrist tucked back over the base, or joints
+        # pinned against their stops. Shaped, not terminal.
+        tcp_radius = float(np.linalg.norm(tcp[:2]))
+        curled = tcp_radius < float(self.ecfg["min_tcp_radius_m"])
+        self.curl_steps += int(curled)
+        span = np.maximum(self.hi - self.lo, 1e-6)
+        normalized = 2.0 * (self.data.qpos[self.qadr] - 0.5 * (self.lo + self.hi)) / span
+        limit_strain = float(np.mean(np.power(np.abs(normalized), 8)))
+        reward -= float(self.ecfg["self_collision_penalty"]) * self_hits
+        reward -= float(self.ecfg["curl_penalty"]) * curled
+        reward -= float(self.ecfg["joint_limit_penalty"]) * limit_strain
         reward -= float(self.ecfg["collision_penalty"]) * table_hits
         displaced = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2]))
         if not carrying and displaced > float(self.ecfg["grasp_max_displacement_m"]):
@@ -311,7 +333,8 @@ class OpenYAMFeedEnv(gym.Env):
                 "grip_force_n": grip_force, "peak_grip_force_n": self.peak_grip_force,
                 "crush_steps": self.crush_steps, "object_width_m": self.width[self.name],
                 "object_height": float(obj_pos[2]), "carrying": bool(carrying), "pinched": bool(pinched),
-                "object_displaced_m": displaced}
+                "object_displaced_m": displaced, "self_collisions": self.self_collisions,
+                "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius}
         return self._observation(), float(reward), bool(success), bool(truncated), info
 
     def render(self):

@@ -12,6 +12,7 @@ env:
   action_delta_rad: 0.02
   action_lowpass: 0.35
   max_joint_velocity_rad_s: 1.0
+  min_tcp_radius_m: 0.16      # nothing the task needs lives inside this; curling does
   head_radius_m: 0.18          # virtual wall: TCP never rewarded inside this of the mouth
   staging_m: 0.15              # stop 15 cm short; crossing it is a separate confirmed action
   present_tolerance_m: 0.08
@@ -40,6 +41,9 @@ env:
   lift_bonus: 3.0
   carry_bonus: 0.05
   drop_penalty: 2.0
+  self_collision_penalty: 0.5
+  curl_penalty: 0.5
+  joint_limit_penalty: 0.3
   collision_penalty: 0.2
   knock_penalty: 1.0
   wall_penalty: 1.0
