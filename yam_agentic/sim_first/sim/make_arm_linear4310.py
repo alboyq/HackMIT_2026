@@ -26,8 +26,30 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-MEN = Path("/Users/adipu/so101Sim/mujoco_menagerie/i2rt_yam")
-I2RT = Path("/Users/adipu/so101Sim/third_party/i2rt/i2rt/robot_models")
+def _find(env, names, marker, clone_hint):
+    """Locate an external model tree. Neither is vendored: mujoco_menagerie is ~1 GB and i2rt
+    ships its own repo. Env var wins, else search beside this checkout and in $HOME."""
+    import os
+    v = os.environ.get(env)
+    if v:
+        for n in ("",) + names:
+            c = Path(v) / n if n else Path(v)
+            if (c / marker).exists():
+                return c
+        raise SystemExit(f"{env}={v} does not contain {marker}")
+    here = Path(__file__).resolve()
+    for base in [*here.parents, Path.cwd(), Path.home()]:
+        for n in names:
+            if (base / n / marker).exists():
+                return base / n
+    raise SystemExit(f"cannot find {names[0]}. Set {env}=/path/to/it, or:\n  {clone_hint}")
+
+
+MEN = _find("YAM_MENAGERIE", ("mujoco_menagerie/i2rt_yam", "i2rt_yam"), "yam.xml",
+            "git clone https://github.com/google-deepmind/mujoco_menagerie")
+I2RT = _find("I2RT_ROOT", ("i2rt/i2rt/robot_models", "third_party/i2rt/i2rt/robot_models"),
+             "gripper/linear_4310/linear_4310.xml",
+             "git clone https://github.com/i2rt-robotics/i2rt")
 GRIPPER = "linear_4310"
 OUT = MEN / "_yam_linear4310.xml"
 
