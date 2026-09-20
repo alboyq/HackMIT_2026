@@ -1,8 +1,8 @@
-"""Pick one of four objects and present it to the seated user.
+"""Pick one of three objects and present it to the seated user.
 
 Differences from `openyam_reach.py`, all of them deliberate:
 
-* **Four objects, one chosen per episode**, with its identity in the observation as a one-hot.
+* **Three objects, one chosen per episode**, with its identity in the observation as a one-hot.
   The policy has to condition on WHICH object it was asked for, which is the task the demo needs.
 * **A `present` stage.** Reach/grasp/lift end with the object in the air; this carries it to a
   staging point 15 cm short of the mouth and holds it there. Per HANDOFF.md the arm stops at the
@@ -22,7 +22,7 @@ Differences from `openyam_reach.py`, all of them deliberate:
   only place the policy is rewarded, which is what "firm but not crushing" has to mean when the
   simulator has no notion of bruising.
 
-Observation (31):  qpos 6 | qvel 6 | grip 1 | target-tcp 3 | mouth-tcp 3 | one-hot 4 | width 1 | prev action 7
+Observation (33):  qpos 6 | qvel 6 | grip 1 | target-tcp 3 | mouth-tcp 3 | mouth-object 3 | one-hot 3 | width 1 | prev action 7
 Action (7):        six joint deltas + gripper
 
 The layout is fixed across every stage so one stage's checkpoint seeds the next.
@@ -42,7 +42,7 @@ from arm.ik.scene import YamScene
 from arm.ik.solver import ToolFrame
 
 ARM_JOINTS = tuple(f"joint{i}" for i in range(1, 7))
-OBJECTS = ("apple", "mug", "marker", "block")
+OBJECTS = ("apple", "mug", "block")   # the marker is too thin for these pads
 STAGES = ("reach", "grasp", "lift", "present")
 
 
@@ -81,6 +81,12 @@ class OpenYAMFeedEnv(gym.Env):
         self.rest_z = dict(self.base_rest_z)
         self.width = dict(self.base_width)
         self.geom_body = {i: int(self.model.geom_bodyid[i]) for i in range(self.model.ngeom)}
+        # Every geom on either finger. The jaws meeting is the gripper working, not a
+        # self-collision -- penalising it taught the policy to hold the jaws open.
+        finger_roots = [self.model.body(n).id for n in ("lf_down", "rf_down")]
+        self.finger_geoms = {i for i in range(self.model.ngeom)
+                             if any(self._descends(int(self.model.geom_bodyid[i]), r)
+                                    for r in finger_roots)}
         self.left_pads = set(self.tool._pad_l)
         self.right_pads = set(self.tool._pad_r)
         self.pad_geoms = self.left_pads | self.right_pads
@@ -89,13 +95,19 @@ class OpenYAMFeedEnv(gym.Env):
         self.arm_geoms = {i for i in range(self.model.ngeom)
                           if self._descends(int(self.model.geom_bodyid[i]), root)}
 
+        # Per-joint headroom. The wrist has a much smaller range than the shoulder, so a
+        # flat margin costs it proportionally far more travel.
+        self.margin = np.asarray(self.ecfg["joint_margin_rad"], dtype=np.float64)
+        self.ctrl_lo = self.lo + self.margin
+        self.ctrl_hi = self.hi - self.margin
+        self.limit_weights = np.asarray(self.ecfg["joint_limit_weights"], dtype=np.float64)
         self.home = np.asarray(self.ecfg["home_qpos"], dtype=np.float64)
         self.dt = 1.0 / float(self.ecfg["control_hz"])
         self.n_substeps = int(self.ecfg["physics_substeps"])
         self.model.opt.timestep = self.dt / self.n_substeps
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(7,), dtype=np.float32)
-        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(31,), dtype=np.float32)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(33,), dtype=np.float32)
 
         self.name = OBJECTS[0]
         self.onehot = np.zeros(len(OBJECTS))
@@ -108,6 +120,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.self_collisions = self.curl_steps = 0
         self.prev_dist = 0.0
         self.object_start = np.zeros(3)
+        self.prev_tcp = np.zeros(3)
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
 
@@ -144,8 +157,13 @@ class OpenYAMFeedEnv(gym.Env):
                 adjacent = (b1 == b2
                             or int(self.model.body_parentid[b1]) == b2
                             or int(self.model.body_parentid[b2]) == b1)
-                self_hits += int(not adjacent)
+                both_fingers = g1 in self.finger_geoms and g2 in self.finger_geoms
+                self_hits += int(not adjacent and not both_fingers)
         return touching, (left and right), table_hits, self_hits
+
+    def _pad_distance_to(self, point) -> float:
+        """Distance from `point` to the nearest gripper pad."""
+        return float(min(np.linalg.norm(point - self.data.geom_xpos[g]) for g in self.pad_geoms))
 
     def _grip_force(self) -> float:
         """Largest normal force any gripper pad is putting into the held object, in newtons."""
@@ -162,9 +180,11 @@ class OpenYAMFeedEnv(gym.Env):
     def _observation(self) -> np.ndarray:
         grip = 2.0 * (self.data.ctrl[self.grip_aid] - self.grip_range[0]) / np.ptp(self.grip_range) - 1.0
         tcp = self._tcp()
+        obj = self.scene.object_pos(self.name)
         return np.concatenate((self.data.qpos[self.qadr], self.data.qvel[self.dadr], [grip],
-                               self.target - tcp, self.mouth - tcp, self.onehot,
-                               [self.width[self.name]], self.prev_action)).astype(np.float32)
+                               self.target - tcp, self.mouth - tcp, self.mouth - obj,
+                               self.onehot, [self.width[self.name]],
+                               self.prev_action)).astype(np.float32)
 
     # ------------------------------------------------------------------ episode
     def reset(self, *, seed: int | None = None, options: dict | None = None):
@@ -175,7 +195,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.onehot = np.eye(len(OBJECTS))[OBJECTS.index(self.name)]
 
         noise = self.np_random.uniform(-0.02, 0.02, 6)
-        self.data.qpos[self.qadr] = np.clip(self.home + noise, self.lo + 0.15, self.hi - 0.15)
+        self.data.qpos[self.qadr] = np.clip(self.home + noise, self.ctrl_lo, self.ctrl_hi)
         self.data.ctrl[:6] = self.data.qpos[self.qadr]
         self.data.ctrl[self.grip_aid] = self.grip_range[1]
 
@@ -206,9 +226,11 @@ class OpenYAMFeedEnv(gym.Env):
         approach = self.mouth - np.array([0.0, 0.0, self.mouth[2]])
         approach = approach / max(1e-9, np.linalg.norm(approach))       # base -> mouth, horizontal
         self.stage_point = self.mouth - approach * float(self.ecfg["staging_m"])
+        # Where the FOOD should end up: just short of the lips.
+        self.food_point = self.mouth - approach * float(self.ecfg["food_gap_m"])
 
         if self.stage == "present":
-            self.target = self.stage_point.copy()
+            self.target = self.food_point.copy()
         else:
             self.target = self.scene.object_pos(self.name).copy()
 
@@ -219,6 +241,7 @@ class OpenYAMFeedEnv(gym.Env):
         self.peak_velocity = 0.0
         self.peak_grip_force = 0.0
         self.object_start = self.scene.object_pos(self.name).copy()
+        self.prev_tcp = self._tcp().copy()
         self.prev_dist = float(np.linalg.norm(self.target - self._tcp()))
         return self._observation(), {"success": False, "object": self.name}
 
@@ -232,7 +255,7 @@ class OpenYAMFeedEnv(gym.Env):
         max_delta = cap * self.dt
         desired = self.data.ctrl[:6] + np.clip(
             float(self.ecfg["action_delta_rad"]) * self.filtered[:6], -max_delta, max_delta)
-        self.data.ctrl[:6] = np.clip(desired, self.lo + 0.15, self.hi - 0.15)
+        self.data.ctrl[:6] = np.clip(desired, self.ctrl_lo, self.ctrl_hi)
         self.data.ctrl[self.grip_aid] = (self.grip_range[0]
                                          + 0.5 * (self.filtered[6] + 1) * np.ptp(self.grip_range))
         for _ in range(self.n_substeps):
@@ -246,11 +269,20 @@ class OpenYAMFeedEnv(gym.Env):
         obj_pos = self.scene.object_pos(self.name)
         self.mouth = self.scene.site("mouth")
         if self.stage == "present":
-            self.target = self.stage_point
+            self.target = self.food_point
         else:
             self.target = obj_pos
 
-        distance = float(np.linalg.norm(self.target - tcp))
+        tcp_speed = float(np.linalg.norm(tcp - self.prev_tcp) / self.dt)
+        self.prev_tcp = tcp.copy()
+        if self.stage == "present":
+            distance = float(np.linalg.norm(self.target - obj_pos))
+        else:
+            distance = float(np.linalg.norm(self.target - tcp))
+        # Does the food reach the mouth before the jaws do?
+        obj_radius = 0.5 * float(self.width[self.name])
+        lead_margin = (self._pad_distance_to(self.mouth)
+                       - max(0.0, float(np.linalg.norm(self.mouth - obj_pos)) - obj_radius))
         touching, pinched, table_hits, self_hits = self._contacts()
         held = touching
         self.collisions += table_hits
@@ -265,8 +297,8 @@ class OpenYAMFeedEnv(gym.Env):
         carrying = pinched and closed and lifted
 
         # Virtual wall around the head: never reward getting closer than this.
-        wall = float(self.ecfg["head_radius_m"])
-        head_gap = float(np.linalg.norm(self.mouth - tcp))
+        wall = float(self.ecfg["pad_min_distance_m"])
+        head_gap = self._pad_distance_to(self.mouth)
         breached = head_gap < wall
         self.wall_hits += int(breached)
 
@@ -281,18 +313,35 @@ class OpenYAMFeedEnv(gym.Env):
             self.hold_steps = self.hold_steps + 1 if carrying else 0
             success = self.hold_steps >= round(float(self.ecfg["lift_hold_s"]) / self.dt)
         else:
-            near = float(np.linalg.norm(self.stage_point - obj_pos)) <= float(
-                self.ecfg["present_tolerance_m"])
-            ok = carrying and near and not breached and not crushing
+            near = distance <= float(self.ecfg["present_tolerance_m"])
+            gentle = tcp_speed <= float(self.ecfg["approach_speed_mps"])
+            leads = lead_margin > 0.0
+            ok = carrying and near and leads and gentle and not breached and not crushing
             self.hold_steps = self.hold_steps + 1 if ok else 0
             success = self.hold_steps >= round(float(self.ecfg["present_hold_s"]) / self.dt)
 
         progress = self.prev_dist - distance
         reward = 10.0 * progress - 0.1 * distance
         reward += float(self.ecfg["grasp_bonus"]) * held
+        # Paid for closing, but only while lined up on the object -- otherwise the policy can
+        # farm it by clenching in mid-air. Closure is read off the COMMAND, so an object too
+        # wide to fully close on still counts as a committed squeeze.
+        grip_fraction = float((self.data.ctrl[self.grip_aid] - self.grip_range[0])
+                              / max(1e-9, np.ptp(self.grip_range)))
+        if distance <= float(self.ecfg["align_m"]):
+            reward += float(self.ecfg["close_bonus"]) * (1.0 - grip_fraction)
+        reward += float(self.ecfg["pinch_bonus"]) * pinched
         reward += float(self.ecfg["lift_bonus"]) * max(0.0, float(obj_pos[2]) - self.rest_z[self.name])
         if self.stage == "present":
             reward += float(self.ecfg["carry_bonus"]) * carrying
+            if carrying and lead_margin > 0.0:
+                reward += float(self.ecfg["lead_bonus"])
+            # Slow down only once it is actually carrying food AND close to the person.
+            # Everywhere else -- crossing the table, reaching, lifting -- speed is free.
+            if carrying and float(np.linalg.norm(self.mouth - tcp)) < float(self.ecfg["slow_radius_m"]):
+                over = tcp_speed - float(self.ecfg["approach_speed_mps"])
+                if over > 0:
+                    reward -= float(self.ecfg["speed_penalty"]) * over
             if held and not carrying and self.steps > 10:
                 reward -= float(self.ecfg["drop_penalty"])      # dropping the food is the failure mode
         reward -= float(self.ecfg["velocity_penalty"]) * np.square(self.data.qvel[self.dadr]).mean()
@@ -304,13 +353,15 @@ class OpenYAMFeedEnv(gym.Env):
         self.curl_steps += int(curled)
         span = np.maximum(self.hi - self.lo, 1e-6)
         normalized = 2.0 * (self.data.qpos[self.qadr] - 0.5 * (self.lo + self.hi)) / span
-        limit_strain = float(np.mean(np.power(np.abs(normalized), 8)))
+        limit_strain = float(np.mean(self.limit_weights * np.power(np.abs(normalized), 8)))
         reward -= float(self.ecfg["self_collision_penalty"]) * self_hits
         reward -= float(self.ecfg["curl_penalty"]) * curled
         reward -= float(self.ecfg["joint_limit_penalty"]) * limit_strain
         reward -= float(self.ecfg["collision_penalty"]) * table_hits
         displaced = float(np.linalg.norm(obj_pos[:2] - self.object_start[:2]))
-        if not carrying and displaced > float(self.ecfg["grasp_max_displacement_m"]):
+        # Batting it across the table, judged well clear of the success threshold so that
+        # ordinary approach contact is not punished.
+        if not carrying and displaced > float(self.ecfg["knock_free_m"]):
             reward -= float(self.ecfg["knock_penalty"]) * min(1.0, displaced)
         reward -= float(self.ecfg["wall_penalty"]) * breached
         # Firm but not crushing: penalise force past the limit, and reward the band below it
@@ -334,7 +385,9 @@ class OpenYAMFeedEnv(gym.Env):
                 "crush_steps": self.crush_steps, "object_width_m": self.width[self.name],
                 "object_height": float(obj_pos[2]), "carrying": bool(carrying), "pinched": bool(pinched),
                 "object_displaced_m": displaced, "self_collisions": self.self_collisions,
-                "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius}
+                "curl_steps": self.curl_steps, "tcp_radius_m": tcp_radius,
+                "grip_fraction": grip_fraction, "lead_margin_m": lead_margin,
+                "tcp_speed_mps": tcp_speed, "pad_gap_m": head_gap}
         return self._observation(), float(reward), bool(success), bool(truncated), info
 
     def render(self):

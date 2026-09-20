@@ -12,10 +12,17 @@ env:
   action_delta_rad: 0.02
   action_lowpass: 0.35
   max_joint_velocity_rad_s: 1.0
+  # joints 1-3 keep real headroom off the stops; the wrist gets most of its range back
+  joint_margin_rad:   [0.15, 0.15, 0.15, 0.04, 0.04, 0.03]
+  joint_limit_weights: [1.0, 1.0, 1.0, 0.4, 0.4, 0.15]   # roll is nearly free
   min_tcp_radius_m: 0.16      # nothing the task needs lives inside this; curling does
   head_radius_m: 0.18          # virtual wall: TCP never rewarded inside this of the mouth
-  staging_m: 0.15              # stop 15 cm short; crossing it is a separate confirmed action
-  present_tolerance_m: 0.08
+  staging_m: 0.15              # kept for reference / the IK path
+  food_gap_m: 0.05             # where the FOOD should arrive: just short of the lips
+  pad_min_distance_m: 0.07     # the jaws may never get closer than this to the mouth
+  slow_radius_m: 0.20          # only this close, and only while carrying
+  approach_speed_mps: 0.15     # and success requires being under this
+  present_tolerance_m: 0.05
   present_hold_s: 0.5
 
   # Scene randomisation: top-down band from MEASUREMENTS.md, plus per-episode re-sizing
@@ -24,6 +31,10 @@ env:
   pad_clearance_m: 0.008       # keep the widest axis this far inside the 83 mm pad opening
   object_angle_range_rad: [-0.55, 0.55]
   home_qpos: [-0.0279, 1.2776, 1.4870, -1.0699, -0.1920, -0.5637]
+  align_m: 0.06                # within this of the object, closing is rewarded
+  close_bonus: 0.20
+  pinch_bonus: 0.30            # both pads on the object, per step
+  knock_free_m: 0.10           # contact under this is approach, not batting
   grasp_hold_s: 0.3            # a grasp has to persist, not flicker for one frame
   grasp_max_displacement_m: 0.04  # beyond this it was batted, not picked up
   lift_height_m: 0.08
@@ -40,6 +51,8 @@ env:
   grasp_bonus: 0.05
   lift_bonus: 3.0
   carry_bonus: 0.05
+  lead_bonus: 0.20             # food ahead of the jaws
+  speed_penalty: 2.0
   drop_penalty: 2.0
   self_collision_penalty: 0.5
   curl_penalty: 0.5
