@@ -6,7 +6,8 @@ object — an apple to your mouth, a mug to the table in front of you.
 
 **Start here:** [HANDOFF.md](HANDOFF.md) — context, architecture, decisions, open questions.
 Then [MEASUREMENTS.md](MEASUREMENTS.md) for the numbers and how they were produced, and
-[GAME_PLAN.md](GAME_PLAN.md) for the research behind the plan.
+[GAME_PLAN.md](GAME_PLAN.md) for **the current plan (sim-first)** and the research behind it.
+Numbers quoted from the earlier SO-101 project are traceable in [`evidence/so101_jar/`](evidence/so101_jar/).
 
 Simulation only so far. Nothing in here has run on the physical arm.
 
@@ -61,6 +62,7 @@ sim/
 tools/
   measure_envelope.py       IK-verified reach envelope
   find_wrist_cam_mount.py   ray-cast search for a camera mount with line of sight
+evidence/so101_jar/     reference copies: code, result files and docs behind the SO-101 numbers
 media/                  filmstrips and single-camera stills
 ```
 

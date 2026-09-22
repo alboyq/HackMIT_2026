@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# Model weights: 2.5 GB, and UniGaze / PureGaze / GazeTR are all released
+# non-commercial — they are fetched by setup.sh, never redistributed here.
+models/weights/
+models/*.task
+models/*.mlpackage/
+
+# Third-party network definitions, fetched from their upstream repos by setup.sh.
+gaze3d/third_party/
+
+# Per-person calibration data (samples + fitted profiles).
+profiles/
+
+# WebGazer baseline, fetched from the CDN by setup.sh.
+vendor/

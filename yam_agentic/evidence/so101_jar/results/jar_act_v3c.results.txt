@@ -1,0 +1,20 @@
+=== jar_act_v3c  Fri Sep 18 06:13:42 PDT 2026  calib=/Users/adipu/so101Sim/rl/real/camera_calib_side_v3.json bg=/Users/adipu/so101Sim/rl/real/bg episodes=600 steps=20000 BATCH=16 JAR_ZONE=0.31 0.41 -0.35 0.35 KP_SCALE=0.1 1.0 JAR_FRICTION=0.35-0.7 SIDE_ZFRAC=0.58
+DONE 634/656 episodes kept, 127148 frames, 365s -> /Users/adipu/so101Sim/rl/runs/jar_act_v3c/demos
+training finished Fri Sep 18 06:59:08 PDT 2026: done
+ACT jar step_10000 na25_preal0.5: 26/48 = 54% (mean max rise 0.058 m, 42s)
+ACT jar step_15000 na25_preal0.5: 30/48 = 62% (mean max rise 0.065 m, 40s)
+ACT jar step_20000 na25_preal0.5: 25/48 = 52% (mean max rise 0.056 m, 39s)
+ACT jar step_5000 na25_preal0.5: 31/48 = 65% (mean max rise 0.065 m, 37s)
+best checkpoint: /Users/adipu/so101Sim/rl/runs/jar_act_v3c/act/step_5000 (31/48)
+ACT jar step_5000 na12_preal0.5: 30/48 = 62% (mean max rise 0.067 m, 41s)
+ACT jar step_5000 na50_preal0.5: 37/48 = 77% (mean max rise 0.080 m, 32s)
+-- best checkpoint, real-kitchen backgrounds only:
+ACT jar step_5000 na25_preal1.0: 71/96 = 74% (mean max rise 0.075 m, 65s)
+-- best checkpoint, random never-the-kitchen backgrounds only:
+ACT jar step_5000 na25_preal0.0: 67/96 = 70% (mean max rise 0.071 m, 67s)
+=== chain done Fri Sep 18 07:05:11 PDT 2026
+--- v3c best (-- best checkpoint, random never-the-kitchen backgrounds only:) vs phone placement error, 96 seeds, kitchen backgrounds:
+--- v3 step_15000 on the same seeds for comparison:
+ACT jar step_15000 na25_preal1.0: 80/96 = 83% (mean max rise 0.085 m, 64s)
+ACT jar step_15000 na25_preal1.0_cj0.07: 63/96 = 66% (mean max rise 0.067 m, 69s)
+ACT jar step_15000 na25_preal1.0_cj0.1: 42/96 = 44% (mean max rise 0.046 m, 73s)

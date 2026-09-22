@@ -1,0 +1,14 @@
+DONE 878/878 episodes kept, 179885 frames, 1814s -> /Users/adipu/so101Sim/rl/runs/wide_cam_demos_filtered
+step_2500  ACT jar step_2500 na25_preal0.5_cj0.15: 24/48 = 50% (mean max rise 0.045 m, 80s)
+step_5000  ACT jar step_5000 na25_preal0.5_cj0.15: 36/48 = 75% (mean max rise 0.070 m, 57s)
+step_7500  ACT jar step_7500 na25_preal0.5_cj0.15: 15/48 = 31% (mean max rise 0.033 m, 62s)
+step_10000  ACT jar step_10000 na25_preal0.5_cj0.15: 34/48 = 71% (mean max rise 0.071 m, 54s)
+step_12500  ACT jar step_12500 na25_preal0.5_cj0.15: 33/48 = 69% (mean max rise 0.067 m, 72s)
+step_15000  ACT jar step_15000 na25_preal0.5_cj0.15: 29/48 = 60% (mean max rise 0.062 m, 36s)
+=== camera-robustness curve, FILTERED step_5000 ===
+  camera offset +-0.0 m: ACT jar step_5000 na25_preal0.5_cj0.0: 40/48 = 83% (mean max rise 0.083 m, 31s)
+  camera offset +-0.04 m: ACT jar step_5000 na25_preal0.5: 37/48 = 77% (mean max rise 0.073 m, 31s)
+  camera offset +-0.10 m: ACT jar step_5000 na25_preal0.5_cj0.1: 33/48 = 69% (mean max rise 0.068 m, 33s)
+  camera offset +-0.15 m: ACT jar step_5000 na25_preal0.5_cj0.15: 37/48 = 77% (mean max rise 0.073 m, 32s)
+  camera offset +-0.20 m: ACT jar step_5000 na25_preal0.5_cj0.2: 28/48 = 58% (mean max rise 0.058 m, 34s)
+=== filtered A/B done Sat Sep 19 12:02:25 EDT 2026 ===

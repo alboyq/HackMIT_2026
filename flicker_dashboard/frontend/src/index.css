@@ -1,0 +1,301 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+
+  /* Within Reach — light, warm-neutral, calm. Built for people who may have
+     limited mobility and motor precision and are choosing this UI with
+     gaze/iris/voice, not a mouse: legibility and a settled, uncluttered feel
+     matter more than "console" mood. Warm neutrals over stark white/black
+     measurably reduce reported screen fatigue; every text/background pairing
+     below is chosen to clear WCAG AA (4.5:1 body text, 3:1 large text/icons).
+     Loud saturated glows are deliberately avoided -- high-contrast blur at a
+     single edge is harder to read for light-sensitive and dyslexic users, so
+     depth comes from soft neutral shadows, not colored bloom. */
+  --bg-0: #fbead9;
+  --bg-1: #fff8f0;
+  --bg-2: #f6dfc3;
+  --border: rgba(120, 95, 70, 0.16);
+  --border-bright: rgba(120, 95, 70, 0.32);
+
+  --text: #55493d;
+  --text-dim: #7c6d5d;
+  --text-bright: #241d16;
+
+  --accent: #c2410c;
+  --accent-dim: #c2410c14;
+  --accent-glow: #c2410c40;
+  --accent-2: #a8660c;
+
+  --violet: #a8536a;
+  --teal: #3f7d58;
+  --danger: #c0392b;
+  --good: #2f855a;
+
+  --font-display: "Syne", "Oswald", sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+
+html, body, #root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  color: var(--text);
+  font-family: var(--font-sans);
+  background:
+    /* fine instrument-grid texture, barely-there */
+    linear-gradient(rgba(120, 95, 70, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 95, 70, 0.035) 1px, transparent 1px),
+    /* two soft warm pools, quiet enough not to fight page content */
+    radial-gradient(ellipse 900px 640px at 10% -8%, rgba(216, 88, 18, 0.11), transparent 55%),
+    radial-gradient(ellipse 1000px 700px at 100% 108%, rgba(206, 118, 18, 0.12), transparent 55%),
+    var(--bg-0);
+  background-size: 46px 46px, 46px 46px, auto, auto, auto;
+  background-attachment: fixed;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+.font-display {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+}
+
+.hud-grid {
+  background-image:
+    linear-gradient(rgba(120, 95, 70, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 95, 70, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.panel {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px) saturate(1.15);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.6),
+    0 20px 40px -28px rgba(60, 40, 20, 0.35);
+}
+
+.gaze-stage {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(194, 65, 12, 0.04), transparent 28%),
+    radial-gradient(ellipse 80% 70% at 50% 50%, transparent 42%, rgba(243, 236, 225, 0.4) 100%);
+}
+
+.gaze-arena,
+.iris-arena {
+  position: relative;
+}
+
+/* The corner-tiles-plus-center-HUD layout leaves large open cells by design
+   (they're clear space for a gaze target to travel through) -- this gives
+   that space some texture instead of reading as flat unused background. */
+.gaze-arena::before,
+.iris-arena::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle, rgba(120, 95, 70, 0.16) 1px, transparent 1.4px),
+    radial-gradient(circle at 50% 50%, rgba(194, 65, 12, 0.035), transparent 60%);
+  background-size: 34px 34px, 100% 100%;
+  background-position: center;
+  mask-image: radial-gradient(ellipse 85% 85% at 50% 50%, black 55%, transparent 100%);
+}
+
+.gaze-arena > *,
+.iris-arena > * {
+  position: relative;
+  z-index: 1;
+}
+
+.gaze-arena {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 236px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 236px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.gaze-arena-hud {
+  grid-area: 2 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gaze-slot {
+  container-type: size;
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.gaze-square {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  background: var(--bg-2);
+  border: 2px solid var(--border);
+  border-radius: 22px;
+  box-shadow: 0 14px 32px -20px rgba(60, 40, 20, 0.28);
+}
+
+.gaze-square.fill {
+  width: min(90%, 40vw, 34vh);
+  height: min(90%, 40vw, 34vh);
+  justify-self: center;
+  align-self: center;
+}
+
+.gaze-frame-tl,
+.gaze-frame-tr,
+.gaze-frame-bl,
+.gaze-frame-br {
+  position: absolute;
+  z-index: 12;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  border-color: var(--accent);
+  opacity: 0.85;
+}
+.gaze-frame-tl { top: 10px; left: 10px; border-top: 2px solid; border-left: 2px solid; }
+.gaze-frame-tr { top: 10px; right: 10px; border-top: 2px solid; border-right: 2px solid; }
+.gaze-frame-bl { bottom: 10px; left: 10px; border-bottom: 2px solid; border-left: 2px solid; }
+.gaze-frame-br { bottom: 10px; right: 10px; border-bottom: 2px solid; border-right: 2px solid; }
+
+.corner-brackets {
+  position: relative;
+}
+.corner-brackets::before,
+.corner-brackets::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+.corner-brackets::before {
+  top: -5px;
+  left: -5px;
+  border-top: 1px solid var(--accent);
+  border-left: 1px solid var(--accent);
+}
+.corner-brackets::after {
+  bottom: -5px;
+  right: -5px;
+  border-bottom: 1px solid var(--accent-2);
+  border-right: 1px solid var(--accent-2);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.signal-bars {
+  display: flex;
+  height: 16px;
+  align-items: flex-end;
+  gap: 3px;
+}
+.signal-bar {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-2); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 4px; }
+
+/* ============ /iris — iris-tracking mode ============ */
+
+.iris-chamber {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(168, 102, 12, 0.05), transparent 32%),
+    radial-gradient(ellipse 80% 70% at 50% 50%, transparent 40%, rgba(243, 236, 225, 0.5) 100%);
+}
+
+.iris-target svg {
+  filter: drop-shadow(0 0 8px rgba(194, 65, 12, 0.2));
+}
+
+.iris-arena {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 320px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
+.iris-console-slot {
+  grid-area: 2 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+
+.iris-console {
+  width: 280px;
+  max-height: 100%;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.6),
+    0 20px 40px -24px rgba(60, 40, 20, 0.32);
+  overflow: hidden;
+}
+
+.iris-readout {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 5px;
+  column-gap: 8px;
+  font-family: var(--font-mono);
+}
+.iris-readout dt {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+.iris-readout dd {
+  margin: 0;
+  font-size: 11px;
+  text-align: right;
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.iris-reticle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  margin-top: -14px;
+  pointer-events: none;
+  z-index: 15;
+  transition: left 90ms linear, top 90ms linear, opacity 200ms ease;
+}

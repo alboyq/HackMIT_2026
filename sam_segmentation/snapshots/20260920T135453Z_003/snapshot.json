@@ -1,0 +1,93 @@
+{
+  "type": "scene.snapshot",
+  "snapshot_id": "20260920T135453Z_003",
+  "image_size": [
+    1023,
+    2000
+  ],
+  "image_path": "snapshots/20260920T135453Z_003/image.jpg",
+  "objects": [
+    {
+      "id": 1,
+      "label": "item",
+      "score": 0.6211,
+      "frequency_hz": 8.57,
+      "bbox_px": [
+        141,
+        98,
+        363,
+        364
+      ],
+      "centroid_px": [
+        252,
+        228
+      ],
+      "area_px": 39274,
+      "mask_path": "snapshots/20260920T135453Z_003/mask_2.png",
+      "mask_url": "/snapshots/20260920T135453Z_003/mask_2.png"
+    },
+    {
+      "id": 2,
+      "label": "item",
+      "score": 0.6172,
+      "frequency_hz": 10.0,
+      "bbox_px": [
+        467,
+        495,
+        728,
+        758
+      ],
+      "centroid_px": [
+        583,
+        635
+      ],
+      "area_px": 50795,
+      "mask_path": "snapshots/20260920T135453Z_003/mask_3.png",
+      "mask_url": "/snapshots/20260920T135453Z_003/mask_3.png"
+    },
+    {
+      "id": 3,
+      "label": "item",
+      "score": 0.6055,
+      "frequency_hz": 12.0,
+      "bbox_px": [
+        419,
+        986,
+        693,
+        1277
+      ],
+      "centroid_px": [
+        557,
+        1129
+      ],
+      "area_px": 60178,
+      "mask_path": "snapshots/20260920T135453Z_003/mask_4.png",
+      "mask_url": "/snapshots/20260920T135453Z_003/mask_4.png"
+    },
+    {
+      "id": 4,
+      "label": "item",
+      "score": 0.6211,
+      "frequency_hz": 15.0,
+      "bbox_px": [
+        244,
+        1598,
+        539,
+        1924
+      ],
+      "centroid_px": [
+        377,
+        1772
+      ],
+      "area_px": 70578,
+      "mask_path": "snapshots/20260920T135453Z_003/mask_1.png",
+      "mask_url": "/snapshots/20260920T135453Z_003/mask_1.png"
+    }
+  ],
+  "frequency_table": {
+    "1": 8.57,
+    "2": 10.0,
+    "3": 12.0,
+    "4": 15.0
+  }
+}

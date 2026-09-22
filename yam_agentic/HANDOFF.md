@@ -1,5 +1,12 @@
 # Handoff — agentic pick-and-deliver on the openYAM
 
+> **Update, 19 Sep late evening — the direction changed after this was written.** The plan is now
+> **sim-first**: a policy trained in simulation with 2D prompts replaces the run-time
+> "perception → 3D → IK" stack described in §3–§4 below, which becomes the fallback. Read
+> [GAME_PLAN.md](GAME_PLAN.md) first. §5–§8 here (what is built, decisions, bugs, hardware
+> assumptions) still stand. Evidence from the earlier SO-101 work is in
+> [`evidence/so101_jar/`](evidence/so101_jar/).
+
 **Status as of 2026-09-19 evening.** Simulation track is built and green; nothing has run on the
 physical arm yet. Everything here is reproducible from this folder — see [README.md](README.md).
 
