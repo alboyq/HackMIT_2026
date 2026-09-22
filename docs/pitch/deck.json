@@ -1,0 +1,42 @@
+{
+ "v": 4,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-09-20T13:16:39Z"
+ },
+ "title": "Assistive Feeding Arm Pitch",
+ "order": [
+  "cover",
+  "problem",
+  "how",
+  "demo",
+  "learned",
+  "safety",
+  "everyone",
+  "today",
+  "close",
+  "sources"
+ ],
+ "cover": "cover",
+ "sections": {
+  "s1": {
+   "description": "Who this is for and what the arm does, shown live.",
+   "start": "cover"
+  },
+  "s2": {
+   "description": "How the grasp was learned, and how safety and inclusion are built in.",
+   "start": "learned"
+  },
+  "s3": {
+   "description": "What is real today, what is next, and the sources.",
+   "start": "today"
+  }
+ },
+ "faces": {
+  "dm-sans": {
+   "family": "DM Sans",
+   "href": "https://fonts.googleapis.com/css2?family=DM+Sans:wght@400..700&display=swap"
+  }
+ },
+ "designSystems": []
+}
